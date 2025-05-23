@@ -1,0 +1,37 @@
+version: '3'
+
+services:
+  db:
+    image: postgres:15-alpine
+    env_file:
+      - .env
+    ports:
+      - "18100:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - bot_network
+
+  bot:
+    build:
+      context: .
+      dockerfile: docker/bot/Dockerfile
+    env_file:
+      - .env
+    ports:
+      - "18101:8080"
+    volumes:
+      - ./bot:/bot
+      - ./logs:/bot/logs
+      - ./tests:/bot/tests
+    networks:
+      - bot_network
+    depends_on:
+      - db
+
+volumes:
+  postgres_data:
+
+networks:
+  bot_network:
+    driver: bridge
