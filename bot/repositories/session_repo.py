@@ -1,11 +1,13 @@
-from bot.repositories.base_repo import BaseRepository
-from bot.models.session import Session, SessionRequest, SessionRequestStatus
+from repositories.base_repo import BaseRepository
+from models.session import Session, SessionRequest, SessionRequestStatus, SessionReview
 from datetime import datetime
 from typing import List, Optional
 
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, update, delete
+from logger import logger
+
 class SessionRepository(BaseRepository[Session]):
     def __init__(self, session: AsyncSession):
         super().__init__(session, Session)
@@ -16,30 +18,24 @@ class SessionRepository(BaseRepository[Session]):
         return result.scalars().all()
 
     async def get_active_sessions(self) -> List[Session]:
-        query = select(Session).where(Session.end_time > datetime.now())
+        query = select(Session).where(Session.is_active == True)
         result = await self.session.execute(query)
         return result.scalars().all()
 
     async def get_active_sessions_by_coach_id(self, coach_id: int) -> List[Session]:
-        query = select(Session).where(Session.coach_id == coach_id, Session.end_time > datetime.now())
+        query = select(Session).where(Session.coach_id == coach_id, Session.is_active == True).order_by(Session.created_at.desc())
         result = await self.session.execute(query)
         return result.scalars().all()
 
     async def get_active_sessions_by_user_id(self, user_id: int) -> List[Session]:
-        query = select(Session).where(Session.user_id == user_id, Session.end_time > datetime.now())
+        query = select(Session).where(Session.is_active == True, Session.coach_id == user_id)
         result = await self.session.execute(query)
         return result.scalars().all()
 
-    async def get_session_by_id(self, session_id: int) -> Optional[Session]:
-        query = select(Session).where(Session.id == session_id)
+    async def get_last_created_session_by_coach_id(self, coach_id: int) -> Optional[Session]:
+        query = select(Session).where(Session.coach_id == coach_id).order_by(Session.created_at.desc())
         result = await self.session.execute(query)
-        return result.scalar_one_or_none()
-
-    async def create_session(self, coach_id: int, **kwargs) -> Session:
-        session = Session(coach_id=coach_id, **kwargs)
-        self.session.add(session)
-        await self.session.commit()
-        return session
+        return result.scalars().first()
 
     async def get_request_by_id(self, request_id: int) -> Optional[SessionRequest]:
         query = select(SessionRequest).where(SessionRequest.id == request_id)
@@ -50,6 +46,11 @@ class SessionRepository(BaseRepository[Session]):
         query = select(SessionRequest).where(SessionRequest.session_id == session_id)
         result = await self.session.execute(query)
         return result.scalars().all()
+
+    async def get_request_by_user_id(self, session_id: int, user_id: int) -> Optional[SessionRequest]:
+        query = select(SessionRequest).where(SessionRequest.session_id == session_id, SessionRequest.user_id == user_id)
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
 
     async def create_request(self, session_id: int, user_id: int, status: SessionRequestStatus) -> SessionRequest:
         request = SessionRequest(session_id=session_id, user_id=user_id, status=status)
@@ -75,4 +76,38 @@ class SessionRepository(BaseRepository[Session]):
             await self.session.commit()
             return True
         return False
+
+    async def create_review(self, session_id: int, user_id: int, **kwargs) -> SessionReview:
+        review = SessionReview(session_id=session_id, user_id=user_id, **kwargs)
+        self.session.add(review)
+        await self.session.commit()
+        return review
     
+    async def get_reviews_by_session_id(self, session_id: int) -> List[SessionReview]:
+        logger.info(f"Getting reviews for session {session_id}")
+        query = select(SessionReview).where(SessionReview.session_id == session_id)
+        result = await self.session.execute(query)
+        return result.scalars().all()
+
+    async def get_review_by_id(self, review_id: int) -> Optional[SessionReview]:
+        query = select(SessionReview).where(SessionReview.id == review_id)
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
+
+    async def get_reviews_by_user_id(self, user_id: int) -> List[SessionReview]:
+        query = select(SessionReview).where(SessionReview.user_id == user_id)
+        result = await self.session.execute(query)
+        return result.scalars().all()
+    
+    async def update_review(self, review_id: int, **kwargs) -> SessionReview:
+        query = update(SessionReview).where(SessionReview.id == review_id).values(**kwargs).returning(SessionReview)
+        result = await self.session.execute(query)
+        await self.session.commit()
+        return result.scalar_one_or_none()
+    
+    async def delete_review(self, review_id: int) -> bool:
+        query = delete(SessionReview).where(SessionReview.id == review_id)
+        result = await self.session.execute(query)
+        await self.session.commit()
+        return result.rowcount > 0
+

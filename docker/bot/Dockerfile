@@ -13,4 +13,5 @@ RUN apt-get update && \
 
 RUN pip install discord.py asyncpg sqlalchemy alembic pydantic pydantic_settings asyncio fastapi uvicorn
 RUN pip install aiosqlite3 pytest pytest-cov pytest-asyncio aiosqlite
+RUN pip install pandas openpyxl
 CMD ["python", "main.py"]
