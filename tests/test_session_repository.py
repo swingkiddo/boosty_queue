@@ -101,16 +101,17 @@ async def test_user2(user_service: UserService) -> User:
 async def test_create_and_get_session(session_service: SessionService, test_coach: User):
     """Тестирует создание и получение сессии."""
     now = get_current_time()
-    planned_start = now + datetime.timedelta(hours=1)
+    start_time = now + datetime.timedelta(hours=1)
     end_time = now + datetime.timedelta(hours=2)
 
     created_session = await session_service.create_session(
+        type="replay",
         coach_id=test_coach.id,
         date=now.date(),
         voice_channel_id=TEST_VOICE_CHANNEL_ID,
         text_channel_id=TEST_TEXT_CHANNEL_ID,
         info_message_id=TEST_INFO_MESSAGE_ID,
-        planned_start_time=planned_start,
+        start_time=start_time,
         end_time=end_time,
         max_slots=5
     )
@@ -131,23 +132,29 @@ async def test_get_all_active_sessions(session_service: SessionService, test_coa
     now = get_current_time()
     
     # Активная сессия
-    await session_service.create_session(
+    session_1 = await session_service.create_session(
+        type="replay",
         coach_id=test_coach.id, date=now.date(), voice_channel_id=1, text_channel_id=1,
-        info_message_id=1, planned_start_time=now - datetime.timedelta(minutes=30),
+        info_message_id=1, start_time=now - datetime.timedelta(minutes=30),
         end_time=now + datetime.timedelta(hours=1) # Заканчивается через час
     )
     # Завершенная сессия
-    await session_service.create_session(
+    session_2 = await session_service.create_session(
+        type="replay",
         coach_id=test_coach.id, date=(now - datetime.timedelta(days=1)).date(), voice_channel_id=2, text_channel_id=2,
-        info_message_id=2, planned_start_time=now - datetime.timedelta(days=1, hours=2),
+        info_message_id=2, start_time=now - datetime.timedelta(days=1, hours=2),
         end_time=now - datetime.timedelta(days=1, hours=1) # Закончилась вчера
     )
     # Будущая сессия (тоже должна считаться активной, если end_time > now)
-    await session_service.create_session(
+    session_3 = await session_service.create_session(
+        type="replay",
         coach_id=test_coach.id, date=(now + datetime.timedelta(days=1)).date(), voice_channel_id=3, text_channel_id=3,
-        info_message_id=3, planned_start_time=now + datetime.timedelta(days=1, hours=1),
+        info_message_id=3, start_time=now + datetime.timedelta(days=1, hours=1),
         end_time=now + datetime.timedelta(days=1, hours=2) # Закончится завтра
     )
+    await session_service.update_session(session_1.id, is_active=True)
+    await session_service.update_session(session_2.id, is_active=False)
+    await session_service.update_session(session_3.id, is_active=True)
 
     active_sessions = await session_service.get_active_sessions()
     assert len(active_sessions) == 2 # Первая и третья сессии
@@ -165,20 +172,21 @@ async def test_create_and_manage_session_requests(session_service: SessionServic
     """Тестирует создание запросов на сессию и управление ими."""
     now = get_current_time()
     created_session = await session_service.create_session(
+        type="replay",
         coach_id=test_coach.id, date=now.date(), voice_channel_id=TEST_VOICE_CHANNEL_ID,
         text_channel_id=TEST_TEXT_CHANNEL_ID, info_message_id=TEST_INFO_MESSAGE_ID,
-        planned_start_time=now + datetime.timedelta(hours=1),
+        start_time=now + datetime.timedelta(hours=1),
         end_time=now + datetime.timedelta(hours=2)
     )
 
     # 1. Создание запросов
-    request1 = await session_service.create_request(session_id=created_session.id, user_id=test_user1.id, status=SessionRequestStatus.PENDING)
+    request1 = await session_service.create_request(session_id=created_session.id, user_id=test_user1.id)
     assert request1 is not None
     assert request1.session_id == created_session.id
     assert request1.user_id == test_user1.id
-    assert request1.status == SessionRequestStatus.PENDING # Статус по умолчанию
+    assert request1.status == SessionRequestStatus.PENDING.value # Статус по умолчанию
 
-    request2 = await session_service.create_request(session_id=created_session.id, user_id=test_user2.id, status=SessionRequestStatus.PENDING)
+    request2 = await session_service.create_request(session_id=created_session.id, user_id=test_user2.id)
     assert request2 is not None
 
     # 2. Получение запросов
@@ -196,10 +204,10 @@ async def test_create_and_manage_session_requests(session_service: SessionServic
     updated_request1 = await session_service.update_request_status(request_id=request1.id, status=SessionRequestStatus.ACCEPTED)
     assert updated_request1 is not None
     assert updated_request1.id == request1.id
-    assert updated_request1.status == SessionRequestStatus.ACCEPTED
+    assert updated_request1.status == SessionRequestStatus.ACCEPTED.value
 
     retrieved_request1_after_update = await session_service.get_request_by_id(request1.id)
-    assert retrieved_request1_after_update.status == SessionRequestStatus.ACCEPTED
+    assert retrieved_request1_after_update.status == SessionRequestStatus.ACCEPTED.value
 
     # 4. Удаление запроса
     # В SessionService сейчас нет delete_request, но есть в SessionRepository
@@ -220,24 +228,28 @@ async def test_active_sessions_by_user(session_service: SessionService, test_coa
     """Тестирует получение активных сессий, на которые записан пользователь."""
     now = get_current_time()
     session1 = await session_service.create_session(
+        type="replay",
         coach_id=test_coach.id, date=now.date(), voice_channel_id=1, text_channel_id=1, info_message_id=1,
-        planned_start_time=now + datetime.timedelta(hours=1), end_time=now + datetime.timedelta(hours=2)
+        start_time=now + datetime.timedelta(hours=1), end_time=now + datetime.timedelta(hours=2)
     )
     session2 = await session_service.create_session( # Другая активная сессия
+        type="replay",
         coach_id=test_coach.id, date=now.date(), voice_channel_id=2, text_channel_id=2, info_message_id=2,
-        planned_start_time=now + datetime.timedelta(hours=3), end_time=now + datetime.timedelta(hours=4)
+        start_time=now + datetime.timedelta(hours=3), end_time=now + datetime.timedelta(hours=4)
     )
     session_past = await session_service.create_session( # Прошедшая сессия
+        type="replay",
         coach_id=test_coach.id, date=now.date(), voice_channel_id=3, text_channel_id=3, info_message_id=3,
-        planned_start_time=now - datetime.timedelta(hours=2), end_time=now - datetime.timedelta(hours=1)
+        start_time=now - datetime.timedelta(hours=2), end_time=now - datetime.timedelta(hours=1)
     )
 
+    await session_service.update_session(session1.id, is_active=True)
     # Пользователь 1 записывается на сессию 1 и на прошедшую сессию
-    await session_service.create_request(session_id=session1.id, user_id=test_user1.id, status=SessionRequestStatus.PENDING)
-    await session_service.create_request(session_id=session_past.id, user_id=test_user1.id, status=SessionRequestStatus.PENDING)
+    await session_service.create_request(session_id=session1.id, user_id=test_user1.id)
+    await session_service.create_request(session_id=session_past.id, user_id=test_user1.id)
 
     # Пользователь 2 записывается на сессию 2
-    await session_service.create_request(session_id=session2.id, user_id=test_user2.id, status=SessionRequestStatus.PENDING)
+    await session_service.create_request(session_id=session2.id, user_id=test_user2.id)
     
     # В SessionService нет прямого метода get_active_sessions_by_user_id,
     # он есть в репозитории. Для теста сервиса нужно либо добавить метод в сервис,
