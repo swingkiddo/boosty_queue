@@ -5,7 +5,8 @@ class Settings(BaseSettings):
     POSTGRES_USER: str
     POSTGRES_PASSWORD: str
     POSTGRES_DB: str
-    POSTGRES_URL: str
+    DATABASE_URL: str
+    MANAGER_ID: int
 
     class Config:
         env_file = ".env"
