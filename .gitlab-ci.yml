@@ -1,0 +1,37 @@
+stages:
+  - build
+  - deploy
+
+variables:
+  DOCKER_DRIVER: overlay2
+  DOCKER_TLS_CERTDIR: "/certs"
+
+build_app:
+  stage: build
+  image: docker:latest
+  services:
+    - docker:dind
+  script:
+    - echo "Building Docker images..."
+    - docker-compose build
+  rules:
+    - if: $CI_COMMIT_BRANCH == "master"
+
+deploy_app:
+  stage: deploy
+  image: alpine/openssh # Образ с SSH клиентом
+  before_script:
+    - apk add --no-cache openssh-client bash docker-compose # Устанавливаем ssh-клиент, bash и docker-compose
+    - mkdir -p ~/.ssh
+    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/id_rsa # Загружаем приватный ключ из переменной
+    - chmod 600 ~/.ssh/id_rsa
+    - eval "$(ssh-agent -s)" # Запускаем ssh-agent
+    - ssh-add ~/.ssh/id_rsa # Добавляем ключ в ssh-agent
+    - echo "$CI_SERVER_HOST_KEY" > ~/.ssh/known_hosts # Добавляем ключ хоста сервера в known_hosts
+    - chmod 644 ~/.ssh/known_hosts
+  script:
+    - echo "Deploying to server..."
+    # Подключаемся к серверу, переходим в директорию проекта, обновляем код и перезапускаем docker-compose
+    - ssh $SERVER_USER_HOST "cd $PROJECT_PATH && git pull origin master && docker-compose down && docker-compose up -d --build"
+  rules:
+    - if: $CI_COMMIT_BRANCH == "master"
