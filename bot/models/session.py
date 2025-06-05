@@ -43,3 +43,12 @@ class SessionReview(Base):
     session_id = Column(Integer, ForeignKey("sessions.id"), nullable=False)
     user_id = Column(BigInteger, ForeignKey("users.id"), nullable=False)
     rating = Column(Integer, nullable=False)
+
+class UserSessionActivity(Base):
+    __tablename__ = "user_session_activity"
+
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(Integer, ForeignKey("sessions.id"), nullable=False, index=True)
+    user_id = Column(BigInteger, ForeignKey("users.id"), nullable=False, index=True)
+    join_time = Column(DateTime, nullable=False)
+    leave_time = Column(DateTime, nullable=True) # Может быть NULL, если пользователь еще в канале

@@ -17,14 +17,22 @@ class ReportService:
         self.session = session_data["session"]
         self.requests = session_data["requests"]
         self.reviews = session_data["reviews"]
+        self.activities = session_data["activities"]
 
     async def create_report(self) -> str:
-        frames = {
-            "Сессия": await self.create_session_info_df(),
-            "Отзывы": await self.create_report_info_df(),
-            "Участники": await self.create_participants_df()
-        }
-        return self.create_report_file(frames)
+        try:
+            frames = {
+                "Сессия": await self.create_session_info_df(),
+                "Отзывы": await self.create_report_info_df(),
+                "Участники": await self.create_participants_df(),
+                "Активность": await self.create_session_activity_df()
+            }
+            return self.create_report_file(frames)
+        except Exception as e:
+            logger.error(f"Error creating report: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return None
 
     async def create_session_info_df(self) -> pd.DataFrame:
         session_info = await self.prepare_session_info()
@@ -38,6 +46,10 @@ class ReportService:
     async def create_participants_df(self) -> pd.DataFrame:
         participants_data = await self.prepare_participants_data()
         return pd.DataFrame(data=participants_data)
+
+    async def create_session_activity_df(self) -> pd.DataFrame:
+        session_activity_info = await self.prepare_session_activity_info()
+        return pd.DataFrame(data=session_activity_info)
 
     def create_report_file(self, frames: Dict[str, pd.DataFrame]) -> str:
         output = BytesIO()
@@ -126,6 +138,7 @@ class ReportService:
         if seconds < 10:
             seconds = f"0{seconds}"
         duration_str = f"{hours}:{minutes}:{seconds}"
+        voice_channel_state = self.bot.channel_states.get(self.session.voice_channel_id)
         session_info = {
             "Сессия": self.session.id,
             "Тип": self.session.type,
@@ -134,8 +147,48 @@ class ReportService:
             "Начало": start_time.strftime("%d.%m.%Y %H:%M:%S"),
             "Конец": end_time.strftime("%d.%m.%Y %H:%M:%S"),
             "Длительность": duration_str,
-            "Максимальное количество участников": self.session.max_slots,
+            "Количество слотов": self.session.max_slots,
+            "Уникальные участники": len(voice_channel_state['unique_users']) if voice_channel_state else "N/A",
             "Положительные реакции": positive_reviews_count,
             "Отрицательные реакции": negative_reviews_count,
         }
         return session_info
+
+    async def prepare_session_activity_info(self) -> Dict[str, Any]:
+        voice_channel_state = self.bot.channel_states.get(self.session.voice_channel_id)
+        activities = [activity.to_dict() for activity in self.activities]
+        activities_df = pd.DataFrame(activities)
+        participants = activities_df['user_id'].unique()
+        if voice_channel_state:
+            unique_users = voice_channel_state['unique_users']
+            unique_user_ids = [user.id for user in unique_users]
+        else:
+            unique_user_ids = []
+        
+        data = {
+            "Участники": [],
+            "Время на сессии": [],
+        }
+        for participant in participants:
+            if participant in unique_user_ids:
+                user = unique_users[unique_user_ids.index(participant)]
+            else:
+                user = await self.bot.fetch_user(participant)
+            activities_df['join_time'] = pd.to_datetime(activities_df['join_time'])
+            activities_df['leave_time'] = pd.to_datetime(activities_df['leave_time'])
+            activities_df['duration'] = activities_df['leave_time'] - activities_df['join_time']
+            activities_df['duration'] = activities_df['duration'].dt.total_seconds()
+            total_duration = activities_df[activities_df['user_id'] == participant]['duration'].sum()
+            hours = int(total_duration // 3600)
+            if hours < 10:
+                hours = f"0{hours}"
+            minutes = int((total_duration % 3600) // 60)
+            if minutes < 10:
+                minutes = f"0{minutes}"
+            data["Участники"].append(user.name)
+            data["Время на сессии"].append(f"{hours}:{minutes}")
+            
+
+        session_activity_df = pd.DataFrame(data)
+        logger.info(f"Session activity df: {session_activity_df}")
+        return session_activity_df

@@ -1,5 +1,5 @@
 from repositories.base_repo import BaseRepository
-from models.session import Session, SessionRequest, SessionRequestStatus, SessionReview
+from models.session import Session, SessionRequest, SessionRequestStatus, SessionReview, UserSessionActivity
 from datetime import datetime
 from typing import List, Optional
 
@@ -111,3 +111,29 @@ class SessionRepository(BaseRepository[Session]):
         await self.session.commit()
         return result.rowcount > 0
 
+    async def create_user_session_activity(self, session_id: int, user_id: int, **kwargs) -> UserSessionActivity:
+        activity = UserSessionActivity(session_id=session_id, user_id=user_id, **kwargs)
+        self.session.add(activity)
+        await self.session.commit()
+        return activity
+
+    async def get_user_session_activity_by_id(self, activity_id: int) -> Optional[UserSessionActivity]:
+        query = select(UserSessionActivity).where(UserSessionActivity.id == activity_id)
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
+
+    async def get_user_session_activities(self, session_id: int, user_id: int) -> List[UserSessionActivity]:
+        query = select(UserSessionActivity).where(UserSessionActivity.session_id == session_id, UserSessionActivity.user_id == user_id).order_by(UserSessionActivity.created_at.desc())
+        result = await self.session.execute(query)
+        return result.scalars().all()
+
+    async def update_user_session_activity(self, activity_id: int, **kwargs) -> UserSessionActivity:
+        query = update(UserSessionActivity).where(UserSessionActivity.id == activity_id).values(**kwargs).returning(UserSessionActivity)
+        result = await self.session.execute(query)
+        await self.session.commit()
+        return result.scalar_one_or_none()
+
+    async def get_session_activities(self, session_id: int) -> List[UserSessionActivity]:
+        query = select(UserSessionActivity).where(UserSessionActivity.session_id == session_id)
+        result = await self.session.execute(query)
+        return result.scalars().all()

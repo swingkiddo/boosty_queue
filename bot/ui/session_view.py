@@ -1,5 +1,6 @@
 import discord
 from discord.ui import View, Button
+from discord.ext import commands
 from models import Session, SessionRequestStatus
 from services import SessionService, DiscordService, UserService
 from factory import ServiceFactory
@@ -228,13 +229,14 @@ class SessionEmbed(discord.Embed):
         return sum(1 for user in self.slots.values() if user == "")
 
 class EndSessionConfirmationView(discord.ui.View):
-    def __init__(self, session: Session, service_factory: ServiceFactory, original_interaction: discord.Interaction = None):
+    def __init__(self, bot: commands.Bot, session: Session, service_factory: ServiceFactory, original_interaction: discord.Interaction = None):
         super().__init__(timeout=180) # Таймаут для View
+        self.bot = bot
         self.session = session
         self.service_factory = service_factory
         self.original_interaction = original_interaction
-        self.add_item(AllParticipantsReviewedButton(session, service_factory))
-        self.add_item(NotAllParticipantsReviewedButton(session, service_factory))
+        self.add_item(AllParticipantsReviewedButton(self.bot, self.session, self.service_factory))
+        self.add_item(NotAllParticipantsReviewedButton(self.bot, self.session, self.service_factory))
 
     async def disable_all_items(self):
         for item in self.children:
@@ -253,10 +255,11 @@ class EndSessionConfirmationView(discord.ui.View):
         # Для этого потребуется доступ к каналу, например, через self.session.text_channel_id
 
 class AllParticipantsReviewedButton(Button):
-    def __init__(self, session: Session, service_factory: ServiceFactory):
+    def __init__(self, bot: commands.Bot, session: Session, service_factory: ServiceFactory):
         super().__init__(label="Да, все разобраны", style=discord.ButtonStyle.success, custom_id="all_reviewed")
         self.session = session
         self.service_factory = service_factory
+        self.bot = bot
 
     async def callback(self, interaction: discord.Interaction):
         await interaction.response.defer() # Подтверждаем получение взаимодействия
@@ -281,7 +284,7 @@ class AllParticipantsReviewedButton(Button):
 
 
 class NotAllParticipantsReviewedButton(Button):
-    def __init__(self, session: Session, service_factory: ServiceFactory):
+    def __init__(self, bot: commands.Bot, session: Session, service_factory: ServiceFactory):
         super().__init__(label="Нет, не все", style=discord.ButtonStyle.danger, custom_id="not_all_reviewed")
         self.session = session
         self.service_factory = service_factory
