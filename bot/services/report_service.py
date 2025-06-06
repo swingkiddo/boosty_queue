@@ -158,7 +158,7 @@ class ReportService:
         voice_channel_state = self.bot.channel_states.get(self.session.voice_channel_id)
         activities = [activity.to_dict() for activity in self.activities]
         activities_df = pd.DataFrame(activities)
-        participants = activities_df['user_id'].unique()
+        participants_ids = activities_df['user_id'].unique()
         if voice_channel_state:
             unique_users = voice_channel_state['unique_users']
             unique_user_ids = [user.id for user in unique_users]
@@ -169,16 +169,16 @@ class ReportService:
             "Участники": [],
             "Время на сессии": [],
         }
-        for participant in participants:
-            if participant in unique_user_ids:
-                user = unique_users[unique_user_ids.index(participant)]
+        for participant_id in participants_ids:
+            if participant_id in unique_user_ids:
+                user = unique_users[unique_user_ids.index(participant_id)]
             else:
-                user = await self.bot.fetch_user(participant)
+                user = await self.bot.fetch_user(participant_id)
             activities_df['join_time'] = pd.to_datetime(activities_df['join_time'])
             activities_df['leave_time'] = pd.to_datetime(activities_df['leave_time'])
             activities_df['duration'] = activities_df['leave_time'] - activities_df['join_time']
             activities_df['duration'] = activities_df['duration'].dt.total_seconds()
-            total_duration = activities_df[activities_df['user_id'] == participant]['duration'].sum()
+            total_duration = activities_df[activities_df['user_id'] == participant_id]['duration'].sum()
             hours = int(total_duration // 3600)
             if hours < 10:
                 hours = f"0{hours}"

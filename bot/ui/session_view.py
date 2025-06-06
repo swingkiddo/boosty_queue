@@ -26,13 +26,16 @@ class JoinSessionButton(Button):
         
     async def callback(self, interaction: discord.Interaction):
         try:
+            if interaction.user.id == self.session.coach_id:
+                await interaction.response.send_message("Вы не можете присоединиться к своей сессии", ephemeral=True)
+                return
             guild = interaction.guild
             members = guild.members
             info_message = interaction.message
 
             participant = await self.user_service.get_user(interaction.user.id)
             if not participant:
-                participant = await self.user_service.create_user(interaction.user.id, interaction.user.name, interaction.user.joined_at.replace(tzinfo=None))
+                participant = await self.user_service.create_user(interaction.user.id, interaction.user.name, join_date=interaction.user.joined_at.replace(tzinfo=None))
 
             request = await self.session_service.create_request(self.session.id, participant.id)
             requests = await self.session_service.get_requests_by_session_id(self.session.id)
@@ -71,7 +74,7 @@ class CancelSessionButton(Button):
 
             participant = await self.user_service.get_user(interaction.user.id)
             if not participant:
-                participant = await self.user_service.create_user(interaction.user.id, interaction.user.name, interaction.user.joined_at.replace(tzinfo=None))
+                participant = await self.user_service.create_user(interaction.user.id, interaction.user.name, join_date=interaction.user.joined_at.replace(tzinfo=None))
 
             request = await self.session_service.get_request_by_user_id(self.session.id, participant.id)
 
@@ -162,23 +165,31 @@ class QuickJoinButton(Button):
         await interaction.response.defer()
         try:
             user = interaction.user
+            if user.id == self.session.coach_id:
+                await interaction.followup.send("Вы не можете присоединиться к своей сессии", ephemeral=True)
+                return
             message = interaction.message
-            request = await self.session_service.get_request_by_user_id(self.session.id, user.id)
+            requests = await self.session_service.get_accepted_requests_by_session_id(self.session.id)
+            accepted_requests = [request for request in requests if request.status == SessionRequestStatus.ACCEPTED.value]
+            if len(accepted_requests) >= self.session.max_slots:
+                await interaction.followup.send("В очереди уже достаточно участников", ephemeral=True)
+                return
 
+            request = await self.session_service.get_request_by_user_id(self.session.id, user.id)
             if request and request.status == SessionRequestStatus.ACCEPTED.value:
                 await interaction.followup.send("Вы уже участвуете в сессии", ephemeral=True)
                 return
 
+            if request and request.status == SessionRequestStatus.REJECTED.value:
+                await self.session_service.update_request_status(request.id, SessionRequestStatus.ACCEPTED)
             if not request:
                 request = await self.session_service.create_request(self.session.id, user.id)
                 await self.session_service.update_request_status(request.id, SessionRequestStatus.ACCEPTED)
-                logger.info(f"Request created: {request}")
-
-            requests = await self.session_service.get_accepted_requests_by_session_id(self.session.id)
-            participants = [interaction.guild.get_member(request.user_id) for request in requests]
-            if len(participants) >= self.session.max_slots:
-                await interaction.followup.send("В очереди уже достаточно участников", ephemeral=True)
-                return
+                
+            requests = await self.session_service.get_requests_by_session_id(self.session.id)
+            accepted_requests = [request for request in requests if request.status == SessionRequestStatus.ACCEPTED.value]
+            participants = [interaction.guild.get_member(request.user_id) for request in accepted_requests]
+            await interaction.followup.send(f"Вы присоединились к сессии", ephemeral=True)
             embed = SessionEmbed(participants, self.session.id, self.session.max_slots)
             await message.edit(embed=embed)
         except Exception as e:
@@ -219,6 +230,7 @@ class SessionEmbed(discord.Embed):
                 user = participants[slot_num]
                 self.slots[slot_num] = user.mention
             self.add_field(name=f"Слот {slot_num + 1}", value="", inline=True)
+        logger.info(f"SessionEmbed: slots: {self.slots}")
         self.update_fields()
 
     def update_fields(self):
@@ -263,14 +275,21 @@ class AllParticipantsReviewedButton(Button):
 
     async def callback(self, interaction: discord.Interaction):
         await interaction.response.defer() # Подтверждаем получение взаимодействия
+        if not interaction.user.id == self.session.coach_id:
+            await interaction.followup.send("Вы не можете завершить сессию, так как не являетесь коучем.", ephemeral=True)
+            return
         try:
             session_service = self.service_factory.get_service('session')
-            discord_service = self.service_factory.get_service('discord')
-            
-            # Завершаем сессию
+            user_service = self.service_factory.get_service('user')
             await session_service.update_session(self.session.id, is_active=False)
-
             await interaction.followup.send(f"Сессия `{self.session.id}` успешно завершена. Все участники были разобраны.", ephemeral=True)
+            requests = await session_service.get_requests_by_session_id(self.session.id)
+            for request in requests:
+                if request.status == SessionRequestStatus.ACCEPTED.value:
+                    user = await user_service.get_user(request.user_id)
+                    field_name = "total_replay_sessions" if self.session.type == "replay" else "total_creative_sessions"
+                    field = getattr(user, field_name)
+                    await user_service.update_user(user.id, **{field_name: field + 1})
             
             # Отключаем кнопки в исходном сообщении
             if self.view:
@@ -286,12 +305,18 @@ class AllParticipantsReviewedButton(Button):
 class NotAllParticipantsReviewedButton(Button):
     def __init__(self, bot: commands.Bot, session: Session, service_factory: ServiceFactory):
         super().__init__(label="Нет, не все", style=discord.ButtonStyle.danger, custom_id="not_all_reviewed")
+        self.bot = bot
         self.session = session
         self.service_factory = service_factory
 
     async def callback(self, interaction: discord.Interaction):
-        await interaction.response.defer()
+        logger.info(interaction)
+        if not interaction.user.id == self.session.coach_id:
+            logger.info(f"NotAllParticipantsReviewedButton: interaction.user.id: {interaction.user.id}, session.coach_id: {self.session.coach_id}")
+            await interaction.followup.send("Вы не можете выбрать участников для выбора, так как не являетесь коучем.", ephemeral=True)
+            return
         try:
+            await interaction.response.defer()
             # Здесь будет логика для отображения UserSelect
             # Пока просто заглушка
             
@@ -300,6 +325,7 @@ class NotAllParticipantsReviewedButton(Button):
             logger.info(f"Session: {self.session}")
             requests = await session_service.get_requests_by_session_id(self.session.id)
             logger.info(f"Requests: {requests}")
+            logger.info(f"Guild: {interaction.guild}")
             # Мы заинтересованы в тех, кто был принят или хотя бы ожидал
             accepted_or_pending_user_ids = [
                 req.user_id for req in requests 
@@ -346,9 +372,9 @@ class NotAllParticipantsReviewedButton(Button):
                 await self.view.disable_all_items()
                 # interaction.edit_original_response здесь не нужен, так как мы уже отправили followup
                 # Если мы хотим отредактировать исходное сообщение, чтобы убрать кнопки:
-                if self.view.message:
-                    await self.view.message.edit(view=self.view)
-                elif self.view.original_interaction: # Если это View было отправлено как ответ на interaction
+                # if self.view.message:
+                #     await self.view.message.edit(view=self.view)
+                if self.view.original_interaction: # Если это View было отправлено как ответ на interaction
                      await self.view.original_interaction.edit_original_response(view=self.view)
 
 
@@ -549,6 +575,9 @@ class LikeButton(Button):
         await interaction.response.defer()
         try:
             user = interaction.user
+            if user.id == self.session.coach_id:
+                await interaction.followup.send("Вы не можете оценивать себя.", ephemeral=True)
+                return
             reviews = await self.session_service.get_reviews_by_session_id(self.session.id)
             review = next((r for r in reviews if r.user_id == user.id), None)
             if review:
@@ -572,6 +601,9 @@ class DislikeButton(Button):
         await interaction.response.defer()
         try:
             user = interaction.user
+            if user.id == self.session.coach_id:
+                await interaction.followup.send("Вы не можете оценивать себя.", ephemeral=True)
+                return
             reviews = await self.session_service.get_reviews_by_session_id(self.session.id)
             logger.info(f"Reviews: {reviews}")
             review = next((r for r in reviews if r.user_id == user.id), None)

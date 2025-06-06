@@ -7,6 +7,7 @@ class User(Base):
     id = Column(BigInteger, primary_key=True)
     nickname = Column(String, nullable=False)
     join_date = Column(DateTime, nullable=False)
+    coach_tier = Column(String, nullable=True)
     total_replay_sessions = Column(Integer, default=0)
     total_creative_sessions = Column(Integer, default=0)
     priority_coefficient = Column(Float, default=0)
