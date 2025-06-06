@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands
 from discord.ext.commands import Cog
-from discord import User, Member, Guild
+from discord import User, Member, Guild, TextChannel
 
 from config import config
 from factory import ServiceFactory
@@ -31,8 +31,14 @@ class SessionCommands(Cog):
         self.service_factory = service_factory
         self.SESSION_AUTO_DELETE_TIME = 3600
 
+    async def response_to_user(self, ctx: commands.Context, message: str, channel: TextChannel = None):
+        if ctx.interaction and not channel:
+            await ctx.interaction.response.send_message(message, ephemeral=True)
+        else:
+            await ctx.send(message) if not channel else await channel.send(message)
+
     @commands.command(name='session')
-    @commands.has_any_role(Roles.MOD, Roles.COACH)
+    @commands.has_any_role(Roles.MOD)
     async def session(self, ctx: commands.Context):
         guild = ctx.guild
         member = await guild.fetch_member(427785500066054147)
@@ -40,13 +46,19 @@ class SessionCommands(Cog):
         ctx.author = member
         await self.create_session(ctx, "replay", 8)
 
-    @commands.command(name='create')
-    @commands.has_any_role(Roles.MOD, Roles.COACH)
+    @commands.hybrid_command(name='create')
+    @commands.has_any_role(Roles.MOD, Roles.COACH_T1, Roles.COACH_T2, Roles.COACH_T3)
     async def create_session(self, ctx: commands.Context, session_type: str, max_slots: int = 8):
+        logger.info(f"type(ctx): {type(ctx)}")
         try:
-            if session_type not in ["replay", "creative"]:
-                await ctx.send("Неверный тип сессии. Пожалуйста, используйте 'replay' или 'creative'.")
+            logger.info(f"ctx.channel.name: {ctx.channel.name}")
+            if not "запуск-сессии" in ctx.channel.name:
+                await self.response_to_user(ctx, "Вы не можете создать сессию в этом канале. Пожалуйста, используйте канал 'запуск-сессии'.")
                 return
+            if session_type not in ["replay", "creative"]:
+                await self.response_to_user(ctx, "Неверный тип сессии. Пожалуйста, используйте 'replay' или 'creative'.")
+                return
+
             author = ctx.author
             guild = ctx.guild
             roles_manager = RolesManager(guild)
@@ -55,7 +67,6 @@ class SessionCommands(Cog):
             user_service = self.service_factory.get_service('user')
             session_service = self.service_factory.get_service('session')
             discord_service = self.service_factory.get_service('discord')
-
 
             coach = await user_service.get_user(author.id)
             if not coach:
@@ -76,7 +87,7 @@ class SessionCommands(Cog):
             overwrites = roles_manager.get_session_channels_overwrites()
             category = await guild.create_category(f"Сессия {session.id}", overwrites=overwrites)
             voice_ch = await guild.create_voice_channel(f"{author.name}", category=category, overwrites=overwrites)
-            text_ch = await guild.create_text_channel(f"Очередь", category=category, overwrites=overwrites)
+            text_ch = await guild.create_text_channel(f"🚦・Очередь", category=category, overwrites=overwrites)
             logger.info(f"Session channels created")
 
             embed = SessionQueueEmbed(author, session.id)
@@ -84,19 +95,27 @@ class SessionCommands(Cog):
             info_message = await text_ch.send(embed=embed, view=view)
             await info_message.pin()
             await session_service.update_session(session.id, info_message_id=info_message.id, voice_channel_id=voice_ch.id, text_channel_id=text_ch.id)
+            if ctx.interaction:
+                await ctx.interaction.response.send_message(f"Сессия {session.id} создана. Коуч: {author.mention}. Количество слотов: {max_slots}")
+            else:
+                await text_ch.send(f"Сессия {session.id} создана. Коуч: {author.mention}. Количество слотов: {max_slots}")
 
+            for channel in guild.text_channels:
+                if "логи-сессий" in channel.name:
+                    await self.response_to_user(ctx, f"Сессия {session.id} создана. Коуч: {author.mention}. Количество слотов: {max_slots}", channel)
+                
         except discord.Forbidden:
-            await ctx.send("У меня нет прав на создание каналов в этом сервере.")
+            await self.response_to_user(ctx, "У меня нет прав на создание каналов в этом сервере.", channel)
         except Exception as e:
             await text_ch.delete()
             await voice_ch.delete()
             await category.delete()
             import traceback
             logger.error(f"Error creating session: {traceback.format_exc()}")
-            await ctx.send("Произошла ошибка при создании сессии. Пожалуйста, попробуйте позже.")
+            await self.response_to_user(ctx, "Произошла ошибка при создании сессии. Пожалуйста, попробуйте позже.", channel)
 
-    @commands.command(name="start")
-    @commands.has_any_role(Roles.MOD, Roles.COACH)
+    @commands.hybrid_command(name="start")
+    @commands.has_any_role(Roles.MOD, Roles.COACH_T1, Roles.COACH_T2, Roles.COACH_T3)
     async def start_session(self, ctx: commands.Context):
         logger.info(f"Starting session for {ctx.guild.name}")
         try:
@@ -104,16 +123,19 @@ class SessionCommands(Cog):
             guild = ctx.guild
             active_sessions = await session_service.get_active_sessions_by_coach_id(ctx.author.id)
             if len(active_sessions) > 0:
-                await ctx.send("У вас есть запущенная сессия. Пожалуйста, завершите её перед началом новой.")
+                await self.response_to_user(ctx, "У вас есть запущенная сессия. Пожалуйста, завершите её перед началом новой.", ctx.channel)
                 return
+
             session = await session_service.get_last_created_session_by_coach_id(ctx.author.id)
             if not session:
-                await ctx.send("У вас нет созданных сессий. Пожалуйста, сначала создайте сессию.")
+                await self.response_to_user(ctx, "У вас нет созданных сессий. Пожалуйста, сначала создайте сессию.", ctx.channel)
                 return
+
             requests = await session_service.get_requests_by_session_id(session.id)
             if not requests:
-                await ctx.send("У вас нет запросов в очередь. Перед тем как запускать распределение и сессию, дождитесь пока очередь заполнится.")
+                await self.response_to_user(ctx, "У вас нет запросов в очередь. Перед тем как запускать распределение и сессию, дождитесь пока очередь заполнится.", ctx.channel)
                 return
+
             requests = [request for request in requests if request.status == SessionRequestStatus.PENDING.value]
             user_ids = [request.user_id for request in requests]
             users = await user_service.get_users_by_ids(user_ids)
@@ -123,7 +145,6 @@ class SessionCommands(Cog):
                 score = ScoreCalculator.calculate_score(user, session.type)
                 scored_users.append({"user": user, "score": score})
             sorted_users = sorted(scored_users, key=lambda x: x["score"], reverse=True)
-            logger.info(f"sorted_users: {sorted_users}")
             accepted_users = sorted_users[:session.max_slots]
             accepted_users = [user["user"] for user in accepted_users]
             for request in requests:
@@ -131,16 +152,11 @@ class SessionCommands(Cog):
                     await session_service.update_request_status(request.id, SessionRequestStatus.ACCEPTED)
                 else:
                     await session_service.update_request_status(request.id, SessionRequestStatus.REJECTED)
-            class TestUser:
-                def __init__(self, id: int, mention: str):
-                    self.id = id
-                    self.mention = mention
+
             participants = [guild.get_member(user.id) for user in accepted_users]
             for i, participant in enumerate(participants):
                 if participant is None:
-                    _user = accepted_users[i]
-                    participants[i] = TestUser(_user.id, _user.nickname)
-            logger.info(f"participants: {participants}")
+                    participants[i] = await self.bot.fetch_user(accepted_users[i].id)
             embed = SessionEmbed(participants, session.id, session.max_slots)
             view = SessionView(session, session_service, discord_service, user_service)
             session_message = await ctx.send(embed=embed, view=view)
@@ -150,14 +166,17 @@ class SessionCommands(Cog):
             for channel in guild.text_channels:
                 if channel.id == session.text_channel_id:
                     text_channel = channel
+                if "логи-сессий" in channel.name:
+                    await channel.send(f"Сессия {session.id} началась. Коуч: {ctx.author.mention}. Участники: {', '.join([participant.mention for participant in participants])}")
+
             if not text_channel:
-                await ctx.send("Канал не найден. Пожалуйста, создайте канал и попробуйте снова.")
+                await self.response_to_user(ctx, "Канал не найден. Пожалуйста, создайте канал и попробуйте снова.", ctx.channel)
                 return
             await text_channel.send(f"Сессия {session.id} началась. Коуч: {ctx.author.mention}")
         except Exception as e:
             import traceback
             logger.error(f"Error starting session: {traceback.format_exc()}")
-            await ctx.send("Произошла ошибка при начале сессии. Пожалуйста, попробуйте позже.")
+            await self.response_to_user(ctx, "Произошла ошибка при начале сессии. Пожалуйста, попробуйте позже.", ctx.channel)
 
     @commands.command(name='delete_channels')
     @commands.has_any_role(Roles.MOD)
@@ -173,11 +192,11 @@ class SessionCommands(Cog):
                         await channel.delete()
                         bot.clear_channel_state(channel.id)
                     await category.delete()
-            await ctx.send("Все каналы были удалены.")
+            await self.response_to_user(ctx, "Все каналы были удалены.", ctx.channel)
         except Exception as e:
             import traceback
             logger.error(f"Error deleting channels: {traceback.format_exc()}")
-            await ctx.send("Произошла ошибка при удалении каналов. Пожалуйста, попробуйте позже.")
+            await self.response_to_user(ctx, "Произошла ошибка при удалении каналов. Пожалуйста, попробуйте позже.", ctx.channel)
 
     async def delete_session_channels(self, guild: Guild, session: Session):
         categories = guild.categories
@@ -188,16 +207,25 @@ class SessionCommands(Cog):
                 await category.delete()
 
     async def prepare_session_report(self, guild: Guild, session: Session):
-        session_service = self.service_factory.get_service('session')
-        session_data = await session_service.get_session_data(session.id)
-        coach = guild.get_member(session.coach_id)
-        participants = [guild.get_member(request.user_id) for request in session_data["requests"]]
-        report_service = ReportService(self.bot, coach, participants, session_data)
-        report = await report_service.create_report()
-        return report
+        try:
+            session_service = self.service_factory.get_service('session')
+            user_service = self.service_factory.get_service('user')
+            session_data = await session_service.get_session_data(session.id)
+            coach = guild.get_member(session.coach_id)
+            users_ids = [request.user_id for request in session_data["requests"]] + [session.coach_id]
+            users = await user_service.get_users_by_ids(users_ids)
+            session_data["users"] = users
+            participants = [guild.get_member(request.user_id) for request in session_data["requests"]]
+            
+            report_service = ReportService(self.bot, coach, participants, session_data)
+            report = await report_service.create_report()
+            return report
+        except Exception as e:
+            logger.error(f"Error preparing session report: {e.with_traceback()}")
+            return None
 
-    @commands.command(name="end")
-    @commands.has_any_role(Roles.MOD, Roles.COACH)
+    @commands.hybrid_command(name="end")
+    @commands.has_any_role(Roles.MOD, Roles.COACH_T1, Roles.COACH_T2, Roles.COACH_T3)
     async def end_session(self, ctx: commands.Context):
         logger.info(f"Attempting to end session for coach {ctx.author.name} in guild {ctx.guild.name}")
         try:
@@ -207,12 +235,13 @@ class SessionCommands(Cog):
             logger.info(f"Active sessions: {active_sessions}")  
 
             if not active_sessions:
-                await ctx.send("У вас нет активных сессий для завершения.", ephemeral=True)
+                await self.response_to_user(ctx, "У вас нет активных сессий для завершения.", ctx.channel)
                 return
             active_session = active_sessions[0]
             end_session_view = EndSessionConfirmationView(ctx.bot, active_session, self.service_factory, ctx.interaction if ctx.interaction else None)
             
             message_content = "Все ли участники были разобраны во время сессии?"
+            # await ctx.author.send(message_content, view=end_session_view)
             if ctx.interaction:
                 # Для слеш-команд используем response.send_message
                 await ctx.interaction.response.send_message(message_content, view=end_session_view, ephemeral=True)
@@ -229,8 +258,13 @@ class SessionCommands(Cog):
             if channel:
                 await channel.send(message_content, view=review_session_view)
             await session_service.update_session(active_session.id, is_active=False, end_time=get_current_time())
+            for ch in ctx.guild.text_channels:
+                if "логи-сессий" in ch.name:
+                    duration = active_session.end_time - active_session.start_time
+                    duration = f'{duration}'.split('.')[0]
+                    await ch.send(f"Сессия {active_session.id} завершена. Коуч: {ctx.author.mention}. Продолжительность: {duration}")
 
-            await ctx.send("Сессия завершена. Каналы автоматически будут удалены через 1 час.")
+            await self.response_to_user(ctx, "Сессия завершена. Каналы автоматически будут удалены через 1 час.", ctx.channel)
             await asyncio.sleep(self.SESSION_AUTO_DELETE_TIME)
             await self.delete_session_channels(ctx.guild, active_session)
 
@@ -255,7 +289,7 @@ class SessionCommands(Cog):
         logger.info(f"Sending report for session {session_id}")
         if ctx.author.id != config.ADMIN_ID:
             return
-
+        user_service = self.service_factory.get_service('user')
         session_service = self.service_factory.get_service('session')
         if session_id:
             session = await session_service.get_session_by_id(session_id)
@@ -280,6 +314,10 @@ class SessionCommands(Cog):
             if participant:
                 participants.append(participant)
         participants.extend(await asyncio.gather(*tasks))
+        users_ids = [request.user_id for request in requests] + [session.coach_id]
+        users = await user_service.get_users_by_ids(users_ids)
+        logger.info(f"Users: {users}")
+        session_data["users"] = users
         report_service = ReportService(self.bot, coach, participants, session_data)
         try:
             await ctx.bot.get_user(config.ADMIN_ID).send("Начинаю создание отчёта...")
