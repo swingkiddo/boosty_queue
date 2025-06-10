@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     POSTGRES_DB: str
     DATABASE_URL: str
     ADMIN_ID: int
+    DEVELOPER_ID: int
 
     class Config:
         env_file = ".env"
