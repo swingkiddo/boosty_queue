@@ -19,7 +19,7 @@ class SessionQueueView(View):
 
 class JoinSessionButton(Button):
     def __init__(self, session: Session, session_service: SessionService, user_service: UserService):
-        super().__init__(label="Присоединиться", style=discord.ButtonStyle.success, custom_id="join_session")
+        super().__init__(label="🏃 В очередь", style=discord.ButtonStyle.success, custom_id="join_session")
         self.session = session
         self.session_service = session_service
         self.user_service = user_service
@@ -37,11 +37,17 @@ class JoinSessionButton(Button):
             if not participant:
                 participant = await self.user_service.create_user(interaction.user.id, interaction.user.name, join_date=interaction.user.joined_at.replace(tzinfo=None))
 
+            request = await self.session_service.get_request_by_user_id(self.session.id, participant.id)
+            if request:
+                await interaction.response.send_message("Вы уже в очереди", ephemeral=True)
+                return
+
             request = await self.session_service.create_request(self.session.id, participant.id)
             requests = await self.session_service.get_requests_by_session_id(self.session.id)
             requests = [request for request in requests if request.status == SessionRequestStatus.PENDING.value]
-            requests = [request.user_id for request in requests]
-            members = [member for member in members if member.id in requests]
+            user_ids = [request.user_id for request in requests]
+            members = [member for member in members if member.id in user_ids]
+
             coach = await guild.fetch_member(self.session.coach_id)
             embed = SessionQueueEmbed(coach, self.session.id)
             embed.update_queue(members)
@@ -61,7 +67,7 @@ class JoinSessionButton(Button):
 
 class CancelSessionButton(Button):
     def __init__(self, session: Session, session_service: SessionService, user_service: UserService):
-        super().__init__(label="Выйти из очереди", style=discord.ButtonStyle.danger, custom_id="cancel_session")
+        super().__init__(label="❌ Выйти", style=discord.ButtonStyle.danger, custom_id="cancel_session")
         self.session = session
         self.session_service = session_service
         self.user_service = user_service
@@ -156,7 +162,7 @@ class SessionView(View):
 
 class QuickJoinButton(Button):
     def __init__(self, session: Session, session_service: SessionService, user_service: UserService):
-        super().__init__(label="Быстро присоединиться", style=discord.ButtonStyle.success, custom_id="quick_join")
+        super().__init__(label="Присоединиться", style=discord.ButtonStyle.success, custom_id="quick_join")
         self.session = session
         self.session_service = session_service
         self.user_service = user_service
@@ -198,7 +204,7 @@ class QuickJoinButton(Button):
 
 class QuitSessionButton(Button):
     def __init__(self, session: Session, session_service: SessionService, user_service: UserService):
-        super().__init__(label="Выйти из сессии", style=discord.ButtonStyle.danger, custom_id="quit_session")
+        super().__init__(label="Освободить слот", style=discord.ButtonStyle.danger, custom_id="quit_session")
         self.session = session
         self.session_service = session_service
         self.user_service = user_service
@@ -268,7 +274,7 @@ class EndSessionConfirmationView(discord.ui.View):
 
 class AllParticipantsReviewedButton(Button):
     def __init__(self, bot: commands.Bot, session: Session, service_factory: ServiceFactory):
-        super().__init__(label="Да, все разобраны", style=discord.ButtonStyle.success, custom_id="all_reviewed")
+        super().__init__(label="✅  Да, все разобраны", style=discord.ButtonStyle.success, custom_id="all_reviewed")
         self.session = session
         self.service_factory = service_factory
         self.bot = bot
@@ -304,7 +310,7 @@ class AllParticipantsReviewedButton(Button):
 
 class NotAllParticipantsReviewedButton(Button):
     def __init__(self, bot: commands.Bot, session: Session, service_factory: ServiceFactory):
-        super().__init__(label="Нет, не все", style=discord.ButtonStyle.danger, custom_id="not_all_reviewed")
+        super().__init__(label="⚠️ Нет, не все", style=discord.ButtonStyle.danger, custom_id="not_all_reviewed")
         self.bot = bot
         self.session = session
         self.service_factory = service_factory
@@ -603,6 +609,10 @@ class DislikeButton(Button):
             user = interaction.user
             if user.id == self.session.coach_id:
                 await interaction.followup.send("Вы не можете оценивать себя.", ephemeral=True)
+                return
+            user_activity = await self.session_service.calculate_user_activity(self.session.id, user.id)
+            if user_activity < 300:
+                await interaction.followup.send("Вы должны провести хотя бы 5 минут в сессии, чтобы оценить её.", ephemeral=True)
                 return
             reviews = await self.session_service.get_reviews_by_session_id(self.session.id)
             logger.info(f"Reviews: {reviews}")
