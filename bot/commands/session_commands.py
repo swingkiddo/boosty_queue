@@ -52,7 +52,7 @@ class SessionCommands(Cog):
         logger.info(f"type(ctx): {type(ctx)}")
         try:
             logger.info(f"ctx.channel.name: {ctx.channel.name}")
-            if not "запуск-сессии" in ctx.channel.name:
+            if not ctx.interaction and not "запуск-сессии" in ctx.channel.name:
                 await self.response_to_user(ctx, "Вы не можете создать сессию в этом канале. Пожалуйста, используйте канал 'запуск-сессии'.")
                 return
             if session_type not in ["replay", "creative"]:
@@ -129,6 +129,10 @@ class SessionCommands(Cog):
             session = await session_service.get_last_created_session_by_coach_id(ctx.author.id)
             if not session:
                 await self.response_to_user(ctx, "У вас нет созданных сессий. Пожалуйста, сначала создайте сессию.", ctx.channel)
+                return
+
+            if ctx.channel.id != session.text_channel_id:
+                await self.response_to_user(ctx, "Вы не можете начать сессию в этом канале. Пожалуйста, используйте канал, где была создана очередь для сессии.", ctx.channel)
                 return
 
             requests = await session_service.get_requests_by_session_id(session.id)
@@ -238,6 +242,9 @@ class SessionCommands(Cog):
                 await self.response_to_user(ctx, "У вас нет активных сессий для завершения.", ctx.channel)
                 return
             active_session = active_sessions[0]
+            if active_session.text_channel_id != ctx.channel.id:
+                await self.response_to_user(ctx, "Вы не можете завершить сессию в этом канале. Пожалуйста, используйте канал, где была создана очередь для сессии.", ctx.channel)
+                return
             end_session_view = EndSessionConfirmationView(ctx.bot, active_session, self.service_factory, ctx.interaction if ctx.interaction else None)
             
             message_content = "Все ли участники были разобраны во время сессии?"
@@ -285,9 +292,9 @@ class SessionCommands(Cog):
                 await ctx.send(error_message)
 
     @commands.command(name="report")
-    async def send_report(self, ctx: commands.Context, session_id: int = None):
+    async def send_report(self, ctx: commands.Context, session_id: int = None, mode: str = "prod"):
         logger.info(f"Sending report for session {session_id}")
-        if ctx.author.id != config.ADMIN_ID:
+        if ctx.author.id not in [config.ADMIN_ID, config.DEVELOPER_ID]:
             return
         user_service = self.service_factory.get_service('user')
         session_service = self.service_factory.get_service('session')
@@ -320,58 +327,12 @@ class SessionCommands(Cog):
         session_data["users"] = users
         report_service = ReportService(self.bot, coach, participants, session_data)
         try:
-            await ctx.bot.get_user(config.ADMIN_ID).send("Начинаю создание отчёта...")
+            admin_user = await ctx.bot.fetch_user(config.ADMIN_ID) if mode == "prod" else await ctx.bot.fetch_user(config.DEVELOPER_ID)
+            logger.info(f"Admin user: {admin_user.name}")
+            await admin_user.send("Начинаю создание отчёта...")
             report = await report_service.create_report()
-            await ctx.bot.get_user(config.ADMIN_ID).send(content=f"Отчёт для сессии {session.id} создан", file=discord.File(report))
+            await admin_user.send(content=f"Отчёт для сессии {session.id} создан", file=discord.File(report))
             os.remove(report)
         except Exception as e:
             logger.error(f"Error sending report: {e.with_traceback()}")
             await ctx.send("Произошла ошибка при отправке отчёта. Пожалуйста, попробуйте позже.")
-
-    @commands.command(name="report_activity")
-    async def report_activity(self, ctx: commands.Context, session_id: int = None):
-        import pandas as pd
-        from random import randint
-        from datetime import datetime, timedelta
-        logger.info(f"Reporting activity for session {session_id}")
-        if ctx.author.id != config.ADMIN_ID:
-            return
-        user_service = self.service_factory.get_service('user')
-        session_service = self.service_factory.get_service('session')
-        activities = await session_service.get_session_activities(session_id)
-        activities = [activity.to_dict() for activity in activities]
-        logger.info(f"Activities: {activities}")
-        activities_df = pd.DataFrame(activities)
-        if activities_df.empty:
-            await ctx.send("Нет данных об активности для этой сессии.")
-            return
-        activities_df['join_time'] = pd.to_datetime(activities_df['join_time'])
-        activities_df['leave_time'] = pd.to_datetime(activities_df['leave_time'])
-        activities_df['duration'] = activities_df['leave_time'] - activities_df['join_time']
-        activities_df['duration'] = activities_df['duration'].dt.total_seconds()
-        
-        # Группировка по user_id и суммирование duration
-        user_activity_summary = activities_df.groupby('user_id')['duration'].sum().reset_index()
-        user_activity_summary.rename(columns={'duration': 'total_duration_seconds'}, inplace=True)
-
-        # Получение уникальных user_id
-        unique_users = activities_df['user_id'].unique()
-
-        logger.info(f"User Activity Summary: \n{user_activity_summary}")
-        logger.info(f"Unique Users: {unique_users.tolist()}")
-
-        response_message = "Отчет по активности:\n"
-        response_message += "Суммарное время нахождения в канале для каждого пользователя:\n"
-        for index, row in user_activity_summary.iterrows():
-            response_message += f"User ID: {row['user_id']}, Total Duration: {row['total_duration_seconds']:.2f} seconds\n"
-        
-        response_message += "\nУникальные пользователи в сессии:\n"
-        response_message += ", ".join(map(str, unique_users.tolist()))
-
-        # Отправка длинных сообщений частями, если необходимо
-        if len(response_message) > 2000:
-            parts = [response_message[i:i+2000] for i in range(0, len(response_message), 2000)]
-            for part in parts:
-                await ctx.send(part)
-        else:
-            await ctx.send(response_message)
