@@ -57,11 +57,11 @@ class BoostyQueueBot(commands.Bot):
                 if not voice_ch.id in self.channel_states:
                     self.channel_states[voice_ch.id] = {
                         'current_users': [member.name],
-                        'unique_users': set([member]),
+                        'unique_users': {member.id: member}
                     }
                 else:
                     self.channel_states[voice_ch.id]['current_users'].append(member.name)
-                    self.channel_states[voice_ch.id]['unique_users'].add(member)
+                    self.channel_states[voice_ch.id]['unique_users'][member.id] = member
 
         if before.channel is not None and before.channel.id in self.channel_states:
             if self.is_session_channel(before.channel):
@@ -153,11 +153,7 @@ class BoostyQueueBot(commands.Bot):
                         join_date = member.joined_at.replace(tzinfo=None)
                         if not user:
                                 await user_service.create_user(member.id, member.name, join_date=join_date)
-                        if user:
-                            from random import randint
-                            total_replay_sessions = randint(1, 20)
-                            total_creative_sessions = randint(1, 20)
-                            await user_service.update_user(user.id, total_replay_sessions=total_replay_sessions, total_creative_sessions=total_creative_sessions)
+
         except Exception as e:
             logger.error(f"Error on_ready: {e}")
             import traceback
