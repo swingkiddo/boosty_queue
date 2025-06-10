@@ -138,7 +138,11 @@ class ReportService:
         if seconds < 10:
             seconds = f"0{seconds}"
         duration_str = f"{hours}:{minutes}:{seconds}"
-        voice_channel_state = self.bot.channel_states.get(self.session.voice_channel_id)
+        session_activities = [activity.to_dict() for activity in self.activities]
+        unique_ids = []
+        for activity in session_activities:
+            if activity['user_id'] not in unique_ids:
+                unique_ids.append(activity['user_id'])
         session_info = {
             "Сессия": self.session.id,
             "Тип": self.session.type,
@@ -148,7 +152,7 @@ class ReportService:
             "Конец": end_time.strftime("%d.%m.%Y %H:%M:%S"),
             "Длительность": duration_str,
             "Количество слотов": self.session.max_slots,
-            "Уникальные участники": len(voice_channel_state['unique_users']) if voice_channel_state else "N/A",
+            "Уникальные участники": len(unique_ids) if unique_ids else "N/A",
             "Положительные реакции": positive_reviews_count,
             "Отрицательные реакции": negative_reviews_count,
         }
@@ -161,7 +165,7 @@ class ReportService:
         participants_ids = activities_df['user_id'].unique()
         if voice_channel_state:
             unique_users = voice_channel_state['unique_users']
-            unique_user_ids = [user.id for user in unique_users]
+            unique_user_ids = list(unique_users.keys())
         else:
             unique_user_ids = []
         
@@ -171,7 +175,7 @@ class ReportService:
         }
         for participant_id in participants_ids:
             if participant_id in unique_user_ids:
-                user = unique_users[unique_user_ids.index(participant_id)]
+                user = unique_users[participant_id]
             else:
                 user = await self.bot.fetch_user(participant_id)
             activities_df['join_time'] = pd.to_datetime(activities_df['join_time'])
