@@ -108,3 +108,9 @@ class SessionService:
 
     async def get_session_activities(self, session_id: int) -> List[UserSessionActivity]:
         return await self.session_repo.get_session_activities(session_id)
+
+    async def calculate_user_activity(self, session_id: int, user_id: int) -> float:
+        activities = await self.get_user_session_activities(session_id, user_id)
+        if not activities:
+            return 0
+        return sum(activity.duration for activity in activities)

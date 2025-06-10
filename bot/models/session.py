@@ -52,3 +52,9 @@ class UserSessionActivity(Base):
     user_id = Column(BigInteger, ForeignKey("users.id"), nullable=False, index=True)
     join_time = Column(DateTime, nullable=False)
     leave_time = Column(DateTime, nullable=True) # Может быть NULL, если пользователь еще в канале
+
+    @property
+    def duration(self) -> float:
+        if self.leave_time:
+            return (self.leave_time - self.join_time).total_seconds()
+        return 0
