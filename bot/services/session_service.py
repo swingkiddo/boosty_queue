@@ -114,3 +114,8 @@ class SessionService:
         if not activities:
             return 0
         return sum(activity.duration for activity in activities)
+
+    async def get_user_sessions_count(self, user_id: int, session_type: str) -> int:
+        if session_type not in ("replay", "creative"):
+            raise ValueError("Invalid session type")
+        return await self.session_repo.get_user_sessions_count(user_id, session_type)
