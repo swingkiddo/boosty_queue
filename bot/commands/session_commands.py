@@ -8,36 +8,82 @@ from factory import ServiceFactory
 from helpers import ScoreCalculator
 from helpers.roles_manager import RolesManager
 from logger import logger
-from models.session import SessionRequestStatus, Session
+from models.session import (
+    SessionRequestStatus,
+    SessionRequest,
+    SessionReview,
+    UserSessionActivity,
+    Session,
+)
 from services.discord_service import Roles
 from services import ReportService
 from utils import get_current_time
+from typing import List
 from ui import (
     SessionQueueView,
     SessionQueueEmbed,
     SessionView,
     SessionEmbed,
     EndSessionConfirmationView,
-    ReviewSessionView
+    ReviewSessionView,
 )
 
 import asyncio
 import os
 
 
+class SessionInfo:
+    def __init__(
+        self,
+        session_id: int,
+        coach_id: int,
+        requests: List[SessionRequest],
+        reviews: List[SessionReview],
+        activities: List[UserSessionActivity],
+        text_channel_id: int,
+        voice_channel_id: int,
+        category_id: int,
+        max_slots: int,
+    ):
+        self.session_id = session_id
+        self.coach_id = coach_id
+        self.requests = requests
+        self.reviews = reviews
+        self.activities = activities
+        self.text_channel_id = text_channel_id
+        self.voice_channel_id = voice_channel_id
+        self.category_id = category_id
+        self.max_slots = max_slots
+
+
 class SessionCommands(Cog):
     def __init__(self, bot: commands.Bot, service_factory: ServiceFactory):
         self.bot = bot
         self.service_factory = service_factory
-        self.SESSION_AUTO_DELETE_TIME = 3600
+        self.SESSION_AUTO_DELETE_TIME = 600
+        self.sessions = {}
 
-    async def response_to_user(self, ctx: commands.Context, message: str, channel: TextChannel = None):
+    async def response_to_user(
+        self, ctx: commands.Context, message: str, channel: TextChannel = None
+    ):
         if ctx.interaction and not channel:
             await ctx.interaction.response.send_message(message, ephemeral=True)
         else:
             await ctx.send(message) if not channel else await channel.send(message)
 
-    @commands.command(name='session')
+    @commands.command(name="test")
+    async def test(self, ctx: commands.Context):
+        user_service = self.service_factory.get_service("user")
+        logger.info(f"ctx.author.id: {ctx.author.id}")
+        users = await user_service.get_users_by_ids([ctx.author.id])
+        logger.info(f"users: {users}")
+        user = users[0]
+        logger.info(f"user: {user.session_requests}")
+        logger.info(
+            f"user.get_sessions_count('replay'): {user.get_sessions_count('replay')}"
+        )
+
+    @commands.command(name="session")
     @commands.has_any_role(Roles.MOD)
     async def session(self, ctx: commands.Context):
         guild = ctx.guild
@@ -46,17 +92,25 @@ class SessionCommands(Cog):
         ctx.author = member
         await self.create_session(ctx, "replay", 8)
 
-    @commands.hybrid_command(name='create')
+    @commands.hybrid_command(name="create")
     @commands.has_any_role(Roles.MOD, Roles.COACH_T1, Roles.COACH_T2, Roles.COACH_T3)
-    async def create_session(self, ctx: commands.Context, session_type: str, max_slots: int = 8):
+    async def create_session(
+        self, ctx: commands.Context, session_type: str, max_slots: int = 8
+    ):
         logger.info(f"type(ctx): {type(ctx)}")
         try:
             logger.info(f"ctx.channel.name: {ctx.channel.name}")
             if not ctx.interaction and not "запуск-сессии" in ctx.channel.name:
-                await self.response_to_user(ctx, "Вы не можете создать сессию в этом канале. Пожалуйста, используйте канал 'запуск-сессии'.")
+                await self.response_to_user(
+                    ctx,
+                    "Вы не можете создать сессию в этом канале. Пожалуйста, используйте канал 'запуск-сессии'.",
+                )
                 return
             if session_type not in ["replay", "creative"]:
-                await self.response_to_user(ctx, "Неверный тип сессии. Пожалуйста, используйте 'replay' или 'creative'.")
+                await self.response_to_user(
+                    ctx,
+                    "Неверный тип сессии. Пожалуйста, используйте 'replay' или 'creative'.",
+                )
                 return
 
             author = ctx.author
@@ -64,98 +118,156 @@ class SessionCommands(Cog):
             roles_manager = RolesManager(guild)
             await roles_manager.check_roles()
 
-            user_service = self.service_factory.get_service('user')
-            session_service = self.service_factory.get_service('session')
-            discord_service = self.service_factory.get_service('discord')
+            user_service = self.service_factory.get_service("user")
+            session_service = self.service_factory.get_service("session")
+            discord_service = self.service_factory.get_service("discord")
 
             coach = await user_service.get_user(author.id)
             if not coach:
-                coach = await user_service.create_user(author.id, author.name, join_date=author.joined_at.replace(tzinfo=None))
+                coach = await user_service.create_user(
+                    author.id,
+                    author.name,
+                    join_date=author.joined_at.replace(tzinfo=None),
+                )
             date = get_current_time()
             session = await session_service.create_session(
-                coach.id, 
+                coach.id,
                 type=session_type,
-                date=date, 
+                date=date,
                 info_message_id=None,
                 voice_channel_id=None,
                 text_channel_id=None,
                 start_time=None,
                 end_time=None,
-                max_slots=max_slots
+                max_slots=max_slots,
             )
+
             logger.info(f"Creating session with max_slots: {max_slots}")
             overwrites = roles_manager.get_session_channels_overwrites()
-            category = await guild.create_category(f"Сессия {session.id}", overwrites=overwrites)
-            voice_ch = await guild.create_voice_channel(f"{author.name}", category=category, overwrites=overwrites)
-            text_ch = await guild.create_text_channel(f"🚦・Очередь", category=category, overwrites=overwrites)
+            category = await guild.create_category(
+                f"Сессия {session.id}", overwrites=overwrites
+            )
+            text_ch = await guild.create_text_channel(
+                f"🚦・Очередь", category=category, overwrites=overwrites
+            )
             logger.info(f"Session channels created")
 
             embed = SessionQueueEmbed(author, session.id)
-            view = SessionQueueView(session, session_service, discord_service, user_service)
+            view = SessionQueueView(
+                session, session_service, discord_service, user_service
+            )
             info_message = await text_ch.send(embed=embed, view=view)
             await info_message.pin()
-            await session_service.update_session(session.id, info_message_id=info_message.id, voice_channel_id=voice_ch.id, text_channel_id=text_ch.id)
+            await session_service.update_session(
+                session.id, info_message_id=info_message.id, text_channel_id=text_ch.id
+            )
             if ctx.interaction:
-                await ctx.interaction.response.send_message(f"Сессия {session.id} создана. Коуч: {author.mention}. Количество слотов: {max_slots}")
+                await ctx.interaction.response.send_message(
+                    f"Сессия {session.id} создана. Коуч: {author.mention}. Количество слотов: {max_slots}"
+                )
             else:
-                await text_ch.send(f"Сессия {session.id} создана. Коуч: {author.mention}. Количество слотов: {max_slots}")
+                await text_ch.send(
+                    f"Сессия {session.id} создана. Коуч: {author.mention}. Количество слотов: {max_slots}"
+                )
 
             for channel in guild.text_channels:
                 if "логи-сессий" in channel.name:
-                    await self.response_to_user(ctx, f"Сессия {session.id} создана. Коуч: {author.mention}. Количество слотов: {max_slots}", channel)
-                
+                    await self.response_to_user(
+                        ctx,
+                        f"Сессия {session.id} создана. Коуч: {author.mention}. Количество слотов: {max_slots}",
+                        channel,
+                    )
+
         except discord.Forbidden:
-            await self.response_to_user(ctx, "У меня нет прав на создание каналов в этом сервере.", channel)
+            await self.response_to_user(
+                ctx, "У меня нет прав на создание каналов в этом сервере.", channel
+            )
         except Exception as e:
             await text_ch.delete()
-            await voice_ch.delete()
             await category.delete()
             import traceback
+
             logger.error(f"Error creating session: {traceback.format_exc()}")
-            await self.response_to_user(ctx, "Произошла ошибка при создании сессии. Пожалуйста, попробуйте позже.", channel)
+            await self.response_to_user(
+                ctx,
+                "Произошла ошибка при создании сессии. Пожалуйста, попробуйте позже.",
+                channel,
+            )
 
     @commands.hybrid_command(name="start")
     @commands.has_any_role(Roles.MOD, Roles.COACH_T1, Roles.COACH_T2, Roles.COACH_T3)
     async def start_session(self, ctx: commands.Context):
         logger.info(f"Starting session for {ctx.guild.name}")
         try:
-            user_service, session_service, discord_service = self.service_factory.get_services()
+            user_service, session_service, discord_service = (
+                self.service_factory.get_services()
+            )
+            session_service = self.service_factory.get_service("session")
             guild = ctx.guild
-            active_sessions = await session_service.get_active_sessions_by_coach_id(ctx.author.id)
+            active_sessions = await session_service.get_active_sessions_by_coach_id(
+                ctx.author.id
+            )
+            coach = guild.get_member(ctx.author.id)
             if len(active_sessions) > 0:
-                await self.response_to_user(ctx, "У вас есть запущенная сессия. Пожалуйста, завершите её перед началом новой.", ctx.channel)
+                await self.response_to_user(
+                    ctx,
+                    "У вас есть запущенная сессия. Пожалуйста, завершите её перед началом новой.",
+                    ctx.channel,
+                )
                 return
 
-            session = await session_service.get_last_created_session_by_coach_id(ctx.author.id)
+            session = await session_service.get_last_created_session_by_coach_id(
+                ctx.author.id
+            )
             if not session:
-                await self.response_to_user(ctx, "У вас нет созданных сессий. Пожалуйста, сначала создайте сессию.", ctx.channel)
+                await self.response_to_user(
+                    ctx,
+                    "У вас нет созданных сессий. Пожалуйста, сначала создайте сессию.",
+                    ctx.channel,
+                )
                 return
 
             if ctx.channel.id != session.text_channel_id:
-                await self.response_to_user(ctx, "Вы не можете начать сессию в этом канале. Пожалуйста, используйте канал, где была создана очередь для сессии.", ctx.channel)
+                await self.response_to_user(
+                    ctx,
+                    f"Вы не можете начать сессию в этом канале. Пожалуйста, используйте канал, где была создана очередь для сессии: {session.id}.",
+                    ctx.channel,
+                )
                 return
 
             requests = await session_service.get_requests_by_session_id(session.id)
             if not requests:
-                await self.response_to_user(ctx, "У вас нет запросов в очередь. Перед тем как запускать распределение и сессию, дождитесь пока очередь заполнится.", ctx.channel)
+                await self.response_to_user(
+                    ctx,
+                    "У вас нет запросов в очередь. Перед тем как запускать распределение и сессию, дождитесь пока очередь заполнится.",
+                    ctx.channel,
+                )
                 return
 
-            requests = [request for request in requests if request.status == SessionRequestStatus.PENDING.value]
+            requests = [
+                request
+                for request in requests
+                if request.status == SessionRequestStatus.PENDING.value
+            ]
             user_ids = [request.user_id for request in requests]
             users = await user_service.get_users_by_ids(user_ids)
-            
+
             scored_users = []
             for user in users:
                 score = ScoreCalculator.calculate_score(user, session.type)
                 scored_users.append({"user": user, "score": score})
             sorted_users = sorted(scored_users, key=lambda x: x["score"], reverse=True)
-            accepted_users = sorted_users[:session.max_slots]
+            accepted_users = sorted_users[: session.max_slots]
             accepted_users = [user["user"] for user in accepted_users]
             for request in requests:
                 if request.user_id in [user.id for user in accepted_users]:
-                    await session_service.update_request_status(request.id, SessionRequestStatus.ACCEPTED)
+                    await session_service.update_request_status(
+                        request.id, SessionRequestStatus.ACCEPTED
+                    )
                 else:
-                    await session_service.update_request_status(request.id, SessionRequestStatus.REJECTED)
+                    await session_service.update_request_status(
+                        request.id, SessionRequestStatus.REJECTED
+                    )
 
             participants = [guild.get_member(user.id) for user in accepted_users]
             for i, participant in enumerate(participants):
@@ -164,63 +276,117 @@ class SessionCommands(Cog):
             embed = SessionEmbed(participants, session.id, session.max_slots)
             view = SessionView(session, session_service, discord_service, user_service)
             session_message = await ctx.send(embed=embed, view=view)
-            await session_service.update_session(session.id, is_active=True, session_message_id=session_message.id, start_time=get_current_time())
+            channel = guild.get_channel(session.text_channel_id)
+            async for message in channel.history(limit=100):
+                if message.id == session.info_message_id:
+                    await message.delete()
+                    break
+            await session_service.update_session(
+                session.id,
+                is_active=True,
+                session_message_id=session_message.id,
+                start_time=get_current_time(),
+            )
 
+            for category in guild.categories:
+                if category.name == f"Сессия {session.id}":
+                    overwrites = RolesManager(guild).get_session_channels_overwrites()
+                    voice_channel = await guild.create_voice_channel(
+                        f"{coach.name}", category=category, overwrites=overwrites
+                    )
+                    await session_service.update_session(
+                        session.id, voice_channel_id=voice_channel.id
+                    )
             text_channel = None
             for channel in guild.text_channels:
                 if channel.id == session.text_channel_id:
                     text_channel = channel
                 if "логи-сессий" in channel.name:
-                    await channel.send(f"Сессия {session.id} началась. Коуч: {ctx.author.mention}. Участники: {', '.join([participant.mention for participant in participants])}")
+                    await channel.send(
+                        f"Сессия {session.id} началась. Коуч: {ctx.author.mention}. Участники: {', '.join([participant.mention for participant in participants])}"
+                    )
 
             if not text_channel:
-                await self.response_to_user(ctx, "Канал не найден. Пожалуйста, создайте канал и попробуйте снова.", ctx.channel)
+                await self.response_to_user(
+                    ctx,
+                    "Канал не найден. Пожалуйста, создайте канал и попробуйте снова.",
+                    ctx.channel,
+                )
                 return
-            await text_channel.send(f"Сессия {session.id} началась. Коуч: {ctx.author.mention}")
+            await text_channel.send(
+                f"Сессия {session.id} началась. Коуч: {ctx.author.mention}"
+            )
         except Exception as e:
             import traceback
-            logger.error(f"Error starting session: {traceback.format_exc()}")
-            await self.response_to_user(ctx, "Произошла ошибка при начале сессии. Пожалуйста, попробуйте позже.", ctx.channel)
 
-    @commands.command(name='delete_channels')
+            logger.error(f"Error starting session: {traceback.format_exc()}")
+            await self.response_to_user(
+                ctx,
+                "Произошла ошибка при начале сессии. Пожалуйста, попробуйте позже.",
+                ctx.channel,
+            )
+
+    @commands.command(name="delete_channels")
     @commands.has_any_role(Roles.MOD)
     async def delete_channels(self, ctx: commands.Context):
         logger.info(f"Deleting channels for {ctx.guild.name}")
+        session_service = self.service_factory.get_service("session")
         try:
-            bot = ctx.bot
             guild = ctx.guild
             categories = guild.categories
             for category in categories:
-                if category.name.startswith('Сессия'):
+                if category.name.startswith("Сессия"):
+                    session_id = int(category.name.split(" ")[1])
+                    session = await session_service.get_session_by_id(session_id)
+                    if session.is_active:
+                        continue
                     for channel in category.channels:
                         await channel.delete()
-                        bot.clear_channel_state(channel.id)
                     await category.delete()
             await self.response_to_user(ctx, "Все каналы были удалены.", ctx.channel)
         except Exception as e:
             import traceback
+
             logger.error(f"Error deleting channels: {traceback.format_exc()}")
-            await self.response_to_user(ctx, "Произошла ошибка при удалении каналов. Пожалуйста, попробуйте позже.", ctx.channel)
+            await self.response_to_user(
+                ctx,
+                "Произошла ошибка при удалении каналов. Пожалуйста, попробуйте позже.",
+                ctx.channel,
+            )
 
     async def delete_session_channels(self, guild: Guild, session: Session):
         categories = guild.categories
+        if session.is_active:
+            await guild.get_channel(session.text_channel_id).send(
+                "Каналы не могут быть удалены, пока сессия активна. Завершите сессию /end"
+            )
         for category in categories:
-            if category.name == f"Сессия {session.id}":
+            if category.name == f"Сессия {session.id}" and not session.is_active:
                 for channel in category.channels:
                     await channel.delete()
                 await category.delete()
 
     async def prepare_session_report(self, guild: Guild, session: Session):
         try:
-            session_service = self.service_factory.get_service('session')
-            user_service = self.service_factory.get_service('user')
+            session_service = self.service_factory.get_service("session")
+            user_service = self.service_factory.get_service("user")
             session_data = await session_service.get_session_data(session.id)
+            coach_db = await user_service.get_user(session.coach_id)
+            session_data["coach_tier"] = coach_db.coach_tier
             coach = guild.get_member(session.coach_id)
-            users_ids = [request.user_id for request in session_data["requests"]] + [session.coach_id]
+            users_ids = [request.user_id for request in session_data["requests"]] + [
+                session.coach_id
+            ]
             users = await user_service.get_users_by_ids(users_ids)
             session_data["users"] = users
-            participants = [guild.get_member(request.user_id) for request in session_data["requests"]]
-            
+            participants = [
+                # guild.get_member(request.user_id)
+                # for request in session_data["requests"]
+            ]
+            for request in session_data["requests"]:
+                participant = await self.bot.fetch_user(request.user_id)
+                participants.append(participant)
+
             report_service = ReportService(self.bot, coach, participants, session_data)
             report = await report_service.create_report()
             return report
@@ -231,73 +397,137 @@ class SessionCommands(Cog):
     @commands.hybrid_command(name="end")
     @commands.has_any_role(Roles.MOD, Roles.COACH_T1, Roles.COACH_T2, Roles.COACH_T3)
     async def end_session(self, ctx: commands.Context):
-        logger.info(f"Attempting to end session for coach {ctx.author.name} in guild {ctx.guild.name}")
+        logger.info(
+            f"Attempting to end session for coach {ctx.author.name} in guild {ctx.guild.name}"
+        )
         try:
-            user_service = self.service_factory.get_service('user')
-            session_service = self.service_factory.get_service('session')
-            active_sessions = await session_service.get_active_sessions_by_coach_id(ctx.author.id)
-            logger.info(f"Active sessions: {active_sessions}")  
+            user_service = self.service_factory.get_service("user")
+            session_service = self.service_factory.get_service("session")
+            
+            active_sessions = await session_service.get_active_sessions_by_coach_id(
+                ctx.author.id
+            )
+            logger.info(f"Active sessions: {active_sessions}")
 
             if not active_sessions:
-                await self.response_to_user(ctx, "У вас нет активных сессий для завершения.", ctx.channel)
+                await self.response_to_user(
+                    ctx, "У вас нет активных сессий для завершения.", ctx.channel
+                )
                 return
             active_session = active_sessions[0]
             if active_session.text_channel_id != ctx.channel.id:
-                await self.response_to_user(ctx, "Вы не можете завершить сессию в этом канале. Пожалуйста, используйте канал, где была создана очередь для сессии.", ctx.channel)
+                await self.response_to_user(
+                    ctx,
+                    "Вы не можете завершить сессию в этом канале. Пожалуйста, используйте канал, где была создана очередь для сессии.",
+                    ctx.channel,
+                )
                 return
-            end_session_view = EndSessionConfirmationView(ctx.bot, active_session, self.service_factory, ctx.interaction if ctx.interaction else None)
-            
-            message_content = "Все ли участники были разобраны во время сессии?"
-            # await ctx.author.send(message_content, view=end_session_view)
-            if ctx.interaction:
-                # Для слеш-команд используем response.send_message
-                await ctx.interaction.response.send_message(message_content, view=end_session_view, ephemeral=True)
-                # Сохраняем сообщение для View, чтобы оно могло себя редактировать
-                # view.message = await ctx.interaction.original_response() # Это нужно если мы не используем followup/edit_original_response в View напрямую
-            else:
-                # Для команд с префиксом
-                sent_message = await ctx.bot.get_user(active_session.coach_id).send(message_content, view=end_session_view)
-                end_session_view.message = sent_message # View сможет редактировать это сообщение
+            text_channel = ctx.guild.get_channel(active_session.text_channel_id)
+            end_session_view = EndSessionConfirmationView(
+                ctx.bot,
+                active_session,
+                self.service_factory,
+                ctx.interaction if ctx.interaction else None,
+            )
 
-            message_content = "Пожалуйста, оцените сессию."
-            review_session_view = ReviewSessionView(active_session, session_service, user_service)
-            channel = ctx.guild.get_channel(active_session.text_channel_id)
-            if channel:
-                await channel.send(message_content, view=review_session_view)
-            await session_service.update_session(active_session.id, is_active=False, end_time=get_current_time())
+            message_content = "Все ли участники были разобраны во время сессии?"
+            if ctx.interaction:
+                await ctx.interaction.response.send_message(
+                    message_content, view=end_session_view
+                )
+            else:
+                if text_channel:
+                    sent_message = await text_channel.send(
+                        message_content, view=end_session_view
+                    )
+                    end_session_view.message = sent_message
+            
+            await session_service.update_session(
+                active_session.id, is_active=False, end_time=get_current_time()
+            )
             for ch in ctx.guild.text_channels:
                 if "логи-сессий" in ch.name:
                     duration = active_session.end_time - active_session.start_time
-                    duration = f'{duration}'.split('.')[0]
-                    await ch.send(f"Сессия {active_session.id} завершена. Коуч: {ctx.author.mention}. Продолжительность: {duration}")
+                    duration = f"{duration}".split(".")[0]
+                    await ch.send(
+                        f"Сессия {active_session.id} завершена. Коуч: {ctx.author.mention}. Продолжительность: {duration}"
+                    )
+            for ch in ctx.guild.voice_channels:
+                if active_session.voice_channel_id == ch.id:
+                    await ch.delete()
 
-            await self.response_to_user(ctx, "Сессия завершена. Каналы автоматически будут удалены через 1 час.", ctx.channel)
+            message_content = f"Сессия {active_session.id} завершена. Коуч: {ctx.author.mention}. Пожалуйста, оцените сессию."
+            review_session_view = ReviewSessionView(
+                active_session, session_service, user_service
+            )
+            session_activities = await session_service.get_session_activities(
+                active_session.id
+            )
+            logger.info(f"Session activities: {session_activities}")
+            activities = {}
+            for activity in session_activities:
+                if activity.user_id not in activities:
+                    activities[activity.user_id] = []
+                activities[activity.user_id].append(activity.duration)
+            for user_id, duration in activities.items():
+                logger.info(f"Duration: {sum(duration)}")
+                if sum(duration) > 1 and user_id != active_session.coach_id:
+                    try:
+                        await self.bot.get_user(user_id).send(
+                            message_content, view=review_session_view
+                        )
+                    except Exception as e:
+                        logger.error(f"Error sending review message: {e.with_traceback()}")
+
+            await text_channel.send(f"Сессия {active_session.id} завершена. Канал автоматически удалится через 10 минут.")
             await asyncio.sleep(self.SESSION_AUTO_DELETE_TIME)
             await self.delete_session_channels(ctx.guild, active_session)
 
             report = await self.prepare_session_report(ctx.guild, active_session)
             with open(report, "rb") as file:
                 await ctx.bot.get_user(config.ADMIN_ID).send(file=discord.File(file))
-            os.remove(report)
+           # os.remove(report)
 
         except Exception as e:
             import traceback
+
             logger.error(f"Error ending session: {traceback.format_exc()}")
-            error_message = "Произошла ошибка при завершении сессии. Пожалуйста, попробуйте позже."
+            error_message = (
+                "Произошла ошибка при завершении сессии. Пожалуйста, попробуйте позже."
+            )
             if ctx.interaction and not ctx.interaction.response.is_done():
-                await ctx.interaction.response.send_message(error_message, ephemeral=True)
+                await ctx.interaction.response.send_message(
+                    error_message, ephemeral=True
+                )
             elif ctx.interaction:
                 await ctx.interaction.followup.send(error_message, ephemeral=True)
             else:
                 await ctx.send(error_message)
 
+    @commands.hybrid_command(name="force_end")
+    @commands.has_any_role(Roles.MOD, Roles.COACH_T1, Roles.COACH_T2, Roles.COACH_T3)
+    async def force_end_session(self, ctx: commands.Context, session_id: int):
+        logger.info(f"Force ending session {session_id}")
+        session_service = self.service_factory.get_service("session")
+        session = await session_service.get_session_by_id(session_id)
+        if session.coach_id != ctx.author.id:
+            await self.response_to_user(
+                ctx,
+                "Вы не можете завершить эту сессию. Пожалуйста, используйте команду для завершения своей сессии.",
+                ctx.channel,
+            )
+            return
+        await self.end_session(ctx)
+
     @commands.command(name="report")
-    async def send_report(self, ctx: commands.Context, session_id: int = None, mode: str = "prod"):
+    async def send_report(
+        self, ctx: commands.Context, session_id: int = None, mode: str = "prod"
+    ):
         logger.info(f"Sending report for session {session_id}")
         if ctx.author.id not in [config.ADMIN_ID, config.DEVELOPER_ID]:
             return
-        user_service = self.service_factory.get_service('user')
-        session_service = self.service_factory.get_service('session')
+        user_service = self.service_factory.get_service("user")
+        session_service = self.service_factory.get_service("session")
         if session_id:
             session = await session_service.get_session_by_id(session_id)
         else:
@@ -310,11 +540,18 @@ class SessionCommands(Cog):
         except Exception as e:
             logger.error(f"Error getting coach: {e.with_traceback()}")
         if not coach:
-            await ctx.send("Коуч не найден. Пожалуйста, проверьте есть ли коуч в базе данных.")
+            await ctx.send(
+                "Коуч не найден. Пожалуйста, проверьте есть ли коуч в базе данных."
+            )
             return
         participants = []
         tasks = []
-        for req in [req for req in requests if req.status == SessionRequestStatus.ACCEPTED.value or req.status == SessionRequestStatus.SKIPPED.value]:
+        for req in [
+            req
+            for req in requests
+            if req.status == SessionRequestStatus.ACCEPTED.value
+            or req.status == SessionRequestStatus.SKIPPED.value
+        ]:
             participant = ctx.guild.get_member(req.user_id)
             if participant is None:
                 tasks.append(self.bot.fetch_user(req.user_id))
@@ -327,12 +564,31 @@ class SessionCommands(Cog):
         session_data["users"] = users
         report_service = ReportService(self.bot, coach, participants, session_data)
         try:
-            admin_user = await ctx.bot.fetch_user(config.ADMIN_ID) if mode == "prod" else await ctx.bot.fetch_user(config.DEVELOPER_ID)
+            admin_user = (
+                await ctx.bot.fetch_user(config.ADMIN_ID)
+                if mode == "prod"
+                else await ctx.bot.fetch_user(config.DEVELOPER_ID)
+            )
             logger.info(f"Admin user: {admin_user.name}")
             await admin_user.send("Начинаю создание отчёта...")
             report = await report_service.create_report()
-            await admin_user.send(content=f"Отчёт для сессии {session.id} создан", file=discord.File(report))
-            os.remove(report)
+            await admin_user.send(
+                content=f"Отчёт для сессии {session.id} создан",
+                file=discord.File(report),
+            )
+            #os.remove(report)
         except Exception as e:
             logger.error(f"Error sending report: {e.with_traceback()}")
-            await ctx.send("Произошла ошибка при отправке отчёта. Пожалуйста, попробуйте позже.")
+            await ctx.send(
+                "Произошла ошибка при отправке отчёта. Пожалуйста, попробуйте позже."
+            )
+
+    @commands.command(name="review")
+    async def review_session(self, ctx: commands.Context, session_id: int):
+        logger.info(f"Reviewing session {session_id}")
+        session_service = self.service_factory.get_service("session")
+        session = await session_service.get_session_by_id(session_id)
+        activities = session.activities
+        logger.info(f"Activities: {activities}")
+        if session.coach_id != ctx.author.id:
+            await self.response_to_user(ctx, "Вы не можете оценить эту сессию.", ctx.channel)
