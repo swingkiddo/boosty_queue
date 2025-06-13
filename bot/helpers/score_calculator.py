@@ -23,11 +23,8 @@ class ScoreCalculator:
         Returns:
             Рассчитанный балл (score).
         """
-        if session_type == ScoreCalculator.SESSION_TYPE_REPLAY:
-            session_count = user.total_replay_sessions
-        elif session_type == ScoreCalculator.SESSION_TYPE_CREATIVE:
-            session_count = user.total_creative_sessions
-        else:
+
+        if not session_type in [ScoreCalculator.SESSION_TYPE_REPLAY, ScoreCalculator.SESSION_TYPE_CREATIVE]:
             logger.warning(
                 f"Unknown session type: '{session_type}' for user {user.id} ({user.nickname}). "
                 f"Valid types are '{ScoreCalculator.SESSION_TYPE_REPLAY}' and '{ScoreCalculator.SESSION_TYPE_CREATIVE}'. "
@@ -37,6 +34,7 @@ class ScoreCalculator:
 
         # Приведение session_count к float для корректного деления
         # Предполагается, что session_count всегда >= 0
+        session_count = user.get_sessions_count(session_type)
         base_score = 1.0 / (1.0 + float(session_count))
 
         applied_priority_coefficient = 0.0
