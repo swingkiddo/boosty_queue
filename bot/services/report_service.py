@@ -121,9 +121,14 @@ class ReportService:
     
     async def prepare_session_info(self) -> Dict[str, Any]:
         reviews = [review.to_dict() for review in self.reviews]
-        reviews_df = pd.DataFrame(reviews)
-        positive_reviews_count = len(reviews_df[reviews_df['rating'] == 1])
-        negative_reviews_count = len(reviews_df[reviews_df['rating'] == 0])
+        if reviews:
+            reviews_df = pd.DataFrame(reviews)
+            positive_reviews_count = len(reviews_df[reviews_df['rating'] == 1])
+            negative_reviews_count = len(reviews_df[reviews_df['rating'] == 0])
+        else:
+            positive_reviews_count = 0
+            negative_reviews_count = 0
+
         date = adapt_db_datetime(self.session.date)
         start_time = adapt_db_datetime(self.session.start_time)
         end_time = adapt_db_datetime(self.session.end_time)
@@ -138,6 +143,7 @@ class ReportService:
         if seconds < 10:
             seconds = f"0{seconds}"
         duration_str = f"{hours}:{minutes}:{seconds}"
+
         session_activities = [activity.to_dict() for activity in self.activities]
         unique_ids = []
         for activity in session_activities:
@@ -147,6 +153,7 @@ class ReportService:
             "Сессия": self.session.id,
             "Тип": self.session.type,
             "Коуч": self.coach.name,
+            "Тир коуча": self.session_data["coach_tier"] if hasattr(self.session_data, "coach_tier") else "N/A",
             "Дата": date.strftime("%d.%m.%Y") if date else "N/A",
             "Начало": start_time.strftime("%d.%m.%Y %H:%M:%S"),
             "Конец": end_time.strftime("%d.%m.%Y %H:%M:%S"),
@@ -189,8 +196,12 @@ class ReportService:
             minutes = int((total_duration % 3600) // 60)
             if minutes < 10:
                 minutes = f"0{minutes}"
+            seconds = int(total_duration % 60)
+            if seconds < 10:
+                seconds = f"0{seconds}"
+            duration_str = f"{hours}:{minutes}:{seconds}"
             data["Участники"].append(user.name)
-            data["Время на сессии"].append(f"{hours}:{minutes}")
+            data["Время на сессии"].append(duration_str)
             
 
         session_activity_df = pd.DataFrame(data)
