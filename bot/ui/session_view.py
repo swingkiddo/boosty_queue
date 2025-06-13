@@ -186,8 +186,9 @@ class QuickJoinButton(Button):
                 await interaction.followup.send("Вы уже участвуете в сессии", ephemeral=True)
                 return
 
-            if request and request.status == SessionRequestStatus.REJECTED.value:
+            if request and (request.status == SessionRequestStatus.REJECTED.value or request.status == SessionRequestStatus.PENDING.value):
                 await self.session_service.update_request_status(request.id, SessionRequestStatus.ACCEPTED)
+            
             if not request:
                 request = await self.session_service.create_request(self.session.id, user.id)
                 await self.session_service.update_request_status(request.id, SessionRequestStatus.ACCEPTED)
