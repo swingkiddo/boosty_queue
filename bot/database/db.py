@@ -5,7 +5,7 @@ from models.base import Base
 from models.user import User
 from datetime import datetime, timedelta
 from sqlalchemy import select, insert
-engine = create_async_engine(config.DATABASE_URL, echo=True)
+engine = create_async_engine(config.DATABASE_URL, echo=False)
 
 async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
