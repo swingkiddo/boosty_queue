@@ -14,3 +14,8 @@ class User(Base):
     priority_given_by = Column(BigInteger, nullable=True)
     priority_expires_at = Column(DateTime, nullable=True)
     session_requests = relationship("SessionRequest", back_populates="user")
+    sessions = relationship("Session", back_populates="coach")
+    session_activities = relationship("UserSessionActivity", back_populates="user")
+
+    def get_sessions_count(self, session_type: str) -> int:
+        return len([req for req in self.session_requests if req.session.type == session_type])

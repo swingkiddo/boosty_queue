@@ -17,8 +17,11 @@ class Session(Base):
     start_time = Column(DateTime, nullable=True, )
     end_time = Column(DateTime, nullable=True)
     max_slots = Column(Integer, default=8)
-    requests = relationship("SessionRequest", back_populates="session")
     is_active = Column(Boolean, default=False)
+    coach = relationship("User", back_populates="sessions")
+    requests = relationship("SessionRequest", back_populates="session")
+    reviews = relationship("SessionReview", back_populates="session")
+    activities = relationship("UserSessionActivity", back_populates="session")
 
 class SessionRequestStatus(enum.Enum):
     PENDING = "pending"
@@ -35,6 +38,7 @@ class SessionRequest(Base):
     status = Column(String, nullable=False)
     session = relationship("Session", back_populates="requests")
     user = relationship("User", back_populates="session_requests")
+    slot_number = Column(Integer, nullable=True)
 
 class SessionReview(Base):
     __tablename__ = "session_reviews"
@@ -43,6 +47,7 @@ class SessionReview(Base):
     session_id = Column(Integer, ForeignKey("sessions.id"), nullable=False)
     user_id = Column(BigInteger, ForeignKey("users.id"), nullable=False)
     rating = Column(Integer, nullable=False)
+    session = relationship("Session", back_populates="reviews")
 
 class UserSessionActivity(Base):
     __tablename__ = "user_session_activity"
@@ -52,6 +57,8 @@ class UserSessionActivity(Base):
     user_id = Column(BigInteger, ForeignKey("users.id"), nullable=False, index=True)
     join_time = Column(DateTime, nullable=False)
     leave_time = Column(DateTime, nullable=True) # Может быть NULL, если пользователь еще в канале
+    user = relationship("User", back_populates="session_activities")
+    session = relationship("Session", back_populates="activities")
 
     @property
     def duration(self) -> float:
