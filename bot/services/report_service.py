@@ -144,11 +144,6 @@ class ReportService:
             seconds = f"0{seconds}"
         duration_str = f"{hours}:{minutes}:{seconds}"
 
-        session_activities = [activity.to_dict() for activity in self.activities]
-        unique_ids = []
-        for activity in session_activities:
-            if activity['user_id'] not in unique_ids:
-                unique_ids.append(activity['user_id'])
         coach_tier = self.session_data.get("coach_tier", "N/A")
         logger.info(f"Coach tier: {coach_tier}")
         session_info = {
@@ -161,7 +156,7 @@ class ReportService:
             "Конец": end_time.strftime("%d.%m.%Y %H:%M:%S"),
             "Длительность": duration_str,
             "Количество слотов": self.session.max_slots,
-            "Уникальные участники": len(unique_ids) if unique_ids else "N/A",
+            "Уникальные участники": len(self.activities.values()) if self.activities else "N/A",
             "Положительные реакции": positive_reviews_count,
             "Отрицательные реакции": negative_reviews_count,
         }
