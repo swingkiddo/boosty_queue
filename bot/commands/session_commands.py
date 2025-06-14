@@ -112,6 +112,12 @@ class SessionCommands(Cog):
                     "Неверный тип сессии. Пожалуйста, используйте 'replay' или 'creative'.",
                 )
                 return
+            if max_slots > 25:
+                await self.response_to_user(
+                    ctx,
+                    "Максимальное количество участников в сессии - 25.",
+                )
+                return
 
             author = ctx.author
             guild = ctx.guild
@@ -433,21 +439,21 @@ class SessionCommands(Cog):
             message_content = "Все ли участники были разобраны во время сессии?"
             if ctx.interaction:
                 await ctx.interaction.response.send_message(
-                    message_content, view=end_session_view
+                    message_content, view=end_session_view, ephemeral=True
                 )
             else:
                 if text_channel:
                     sent_message = await text_channel.send(
-                        message_content, view=end_session_view
+                        message_content, view=end_session_view, ephemeral=True
                     )
                     end_session_view.message = sent_message
-            
+            end_time = get_current_time()
             await session_service.update_session(
-                active_session.id, is_active=False, end_time=get_current_time()
+                active_session.id, is_active=False, end_time=end_time
             )
             for ch in ctx.guild.text_channels:
                 if "логи-сессий" in ch.name:
-                    duration = active_session.end_time - active_session.start_time
+                    duration = end_time - active_session.start_time
                     duration = f"{duration}".split(".")[0]
                     await ch.send(
                         f"Сессия {active_session.id} завершена. Коуч: {ctx.author.mention}. Продолжительность: {duration}"
@@ -468,10 +474,12 @@ class SessionCommands(Cog):
             for activity in session_activities:
                 if activity.user_id not in activities:
                     activities[activity.user_id] = []
+                if not activity.end_time:
+                    await session_service.update_activity(activity.id, end_time=end_time)
                 activities[activity.user_id].append(activity.duration)
             for user_id, duration in activities.items():
                 logger.info(f"Duration: {sum(duration)}")
-                if sum(duration) > 1 and user_id != active_session.coach_id:
+                if sum(duration) > 300 and user_id != active_session.coach_id:
                     try:
                         await self.bot.get_user(user_id).send(
                             message_content, view=review_session_view
@@ -544,6 +552,7 @@ class SessionCommands(Cog):
                 "Коуч не найден. Пожалуйста, проверьте есть ли коуч в базе данных."
             )
             return
+        coach_db = await user_service.get_user(coach.id)
         participants = []
         tasks = []
         for req in [
@@ -562,6 +571,7 @@ class SessionCommands(Cog):
         users = await user_service.get_users_by_ids(users_ids)
         logger.info(f"Users: {users}")
         session_data["users"] = users
+        session_data["coach_tier"] = coach_db.coach_tier
         report_service = ReportService(self.bot, coach, participants, session_data)
         try:
             admin_user = (
@@ -585,10 +595,22 @@ class SessionCommands(Cog):
 
     @commands.command(name="review")
     async def review_session(self, ctx: commands.Context, session_id: int):
-        logger.info(f"Reviewing session {session_id}")
-        session_service = self.service_factory.get_service("session")
-        session = await session_service.get_session_by_id(session_id)
-        activities = session.activities
-        logger.info(f"Activities: {activities}")
-        if session.coach_id != ctx.author.id:
-            await self.response_to_user(ctx, "Вы не можете оценить эту сессию.", ctx.channel)
+        try:
+            logger.info(f"Reviewing session {session_id}")
+            session_service = self.service_factory.get_service("session")
+            logger.info(f"Session service: {session_service}")
+            session = await session_service.get_session_by_id(session_id)
+            logger.info(f"Session: {session}")
+            activities = await session_service.get_session_activities(session_id)
+            logger.info(f"Activities: {activities}")
+            if session.coach_id != ctx.author.id:
+                await self.response_to_user(ctx, "Вы не можете оценить эту сессию.", ctx.channel)
+            review_session_view = ReviewSessionView(
+                session, session_service, user_service
+            )
+            for activity in activities: 
+                logger.info(f"Activity: {activity}")
+            # await ctx.send(view=review_session_view)
+        except Exception as e:
+            logger.error(f"Error reviewing session: {e.with_traceback()}")
+            await self.response_to_user(ctx, "Произошла ошибка при оценке сессии. Пожалуйста, попробуйте позже.", ctx.channel)
