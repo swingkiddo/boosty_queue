@@ -64,4 +64,6 @@ class UserSessionActivity(Base):
     def duration(self) -> float:
         if self.leave_time:
             return (self.leave_time - self.join_time).total_seconds()
+        if self.session.end_time:
+            return (self.session.end_time - self.join_time).total_seconds()
         return 0
