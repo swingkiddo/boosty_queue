@@ -472,20 +472,14 @@ class SessionCommands(Cog):
                 active_session, session_service, user_service
             )
             await text_channel.send(message_content, view=review_session_view)
+
             session_activities = await session_service.get_session_activities(
                 active_session.id
             )
             logger.info(f"Session activities: {session_activities}")
-            activities = {}
-            for activity in session_activities:
-                if activity.user_id not in activities:
-                    activities[activity.user_id] = []
-                if not activity.end_time:
-                    await session_service.update_activity(activity.id, end_time=end_time)
-                activities[activity.user_id].append(activity.duration)
-            for user_id, duration in activities.items():
-                logger.info(f"Duration: {sum(duration)}")
-                if sum(duration) > 300 and user_id != active_session.coach_id:
+
+            for user_id, duration in session_activities.items():
+                if duration > 300 and user_id != active_session.coach_id:
                     try:
                         await self.bot.get_user(user_id).send(
                             message_content, view=review_session_view
@@ -596,9 +590,7 @@ class SessionCommands(Cog):
         if not session.is_active:
             await self.response_to_user(ctx, f"Сессия {session_id} еще не началась или уже завершена.", ctx.channel)
             return
-        if session.coach_id != ctx.author.id:
-            await self.response_to_user(ctx, f"Вы не можете присоединиться к сессии {session_id}.", ctx.channel)
-            return
+
         accepted_requests = await session_service.get_accepted_requests_by_session_id(session.id)
         if len(accepted_requests) >= session.max_slots:
             await self.response_to_user(ctx, "Все слоты заняты.", ctx.channel)
@@ -730,22 +722,45 @@ class SessionCommands(Cog):
                 "Произошла ошибка при отправке отчёта. Пожалуйста, попробуйте позже."
             ) 
 
-    # @commands.command(name="review")
-    # async def review_session(self, ctx: commands.Context, session_id: int):
-    #     try:
-    #         logger.info(f"Reviewing session {session_id}")
-    #         session_service = self.service_factory.get_service("session")
-    #         logger.info(f"Session service: {session_service}")
-    #         session = await session_service.get_session_by_id(session_id)
-    #         logger.info(f"Session: {session}")
-    #         activities = await session_service.get_session_activities(session_id)
-    #         logger.info(f"Activities: {activities}")
-    #         review_session_view = ReviewSessionView(
-    #             session, session_service, user_service
-    #         )
-    #         for activity in activities: 
-    #             logger.info(f"Activity: {activity}")
-    #         # await ctx.send(view=review_session_view)
-    #     except Exception as e:
-    #         logger.error(f"Error reviewing session: {e.with_traceback()}")
-    #         await self.response_to_user(ctx, "Произошла ошибка при оценке сессии. Пожалуйста, попробуйте позже.", ctx.channel)
+    @commands.command(name="review")
+    @commands.has_any_role(Roles.MOD)
+    async def review_session(self, ctx: commands.Context, session_id: int):
+        try:
+            logger.info(f"Reviewing session {session_id}")
+            session_service = await self.service_factory.get_service("session")
+            user_service = await self.service_factory.get_service("user")
+            logger.info(f"Session service: {session_service}")
+            session = await session_service.get_session_by_id(session_id)
+            if not session:
+                await self.response_to_user(ctx, f"Сессия {session_id} не найдена.", ctx.channel)
+                return
+            logger.info(f"Session: {session}")
+            activities = await session_service.get_session_activities(session_id)
+            if not activities:
+                await self.response_to_user(ctx, f"Сессия {session_id} не имеет активностей.", ctx.channel)
+                return
+            logger.info(f"Activities: {activities}")
+            review_session_view = ReviewSessionView(
+                session, session_service, user_service
+            )
+            coach = await ctx.guild.fetch_member(session.coach_id)
+            message_content = f"Сессия {session.id} завершена. Коуч: {coach.mention}. Пожалуйста, оцените сессию."
+            for user_id, duration in activities.items():
+                logger.info(f"User {user_id} has duration {duration}")
+                if user_id == config.DEVELOPER_ID:
+                    member = await ctx.guild.fetch_member(user_id)
+                    logger.info(f"Member: {member}")
+                    await member.send(message_content, view=review_session_view)
+                if duration > 300 and user_id != session.coach_id:
+                    try:
+                        member = await ctx.guild.fetch_member(user_id)
+                        await member.send(
+                            message_content, view=review_session_view
+                        )
+                        logger.info(f"Sent review message to {member.mention}")
+                    except Exception as e:
+                        logger.error(f"Error sending review message: {e.with_traceback()}")
+            # await ctx.send(view=review_session_view)
+        except Exception as e:
+            logger.error(f"Error reviewing session: {e.with_traceback()}")
+            await self.response_to_user(ctx, "Произошла ошибка при оценке сессии. Пожалуйста, попробуйте позже.", ctx.channel)
