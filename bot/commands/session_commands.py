@@ -518,11 +518,11 @@ class SessionCommands(Cog):
         logger.info(f"Joining queue for {ctx.author.name}")
         session_service = await self.service_factory.get_service("session")
         session = await session_service.get_session_by_id(session_id)
-        if session.coach_id == ctx.author.id:
-            await self.response_to_user(ctx, f"Вы не можете присоединиться к своей сессии.", ctx.channel)
-            return
         if not session:
             await self.response_to_user(ctx, f"Сессия {session_id} не найдена.", ctx.channel)
+            return
+        if session.coach_id == ctx.author.id:
+            await self.response_to_user(ctx, f"Вы не можете присоединиться к своей сессии.", ctx.channel)
             return
         if session and session.is_active:
             await self.response_to_user(ctx, f"Сессия {session_id} уже началась. Используйте /join, если есть свободные слоты.", ctx.channel)
@@ -549,14 +549,14 @@ class SessionCommands(Cog):
         logger.info(f"Leaving queue for {ctx.author.name}")
         session_service = await self.service_factory.get_service("session")
         session = await session_service.get_session_by_id(session_id)
+        if not session:
+            await self.response_to_user(ctx, f"Сессия {session_id} не найдена.", ctx.channel)
+            return
         if session.coach_id == ctx.author.id:
             await self.response_to_user(ctx, f"Вы не можете покинуть очередь на свою сессию.", ctx.channel)
             return
         if session.is_active:
             await self.response_to_user(ctx, f"Сессия {session_id} уже началась, вы не можете покинуть очередь.", ctx.channel)
-            return
-        if not session:
-            await self.response_to_user(ctx, f"Сессия {session_id} не найдена.", ctx.channel)
             return
         request = await session_service.get_request_by_user_id(session.id, ctx.author.id)
         if not request:
@@ -581,11 +581,11 @@ class SessionCommands(Cog):
         logger.info(f"Joining session {session_id}")
         session_service = await self.service_factory.get_service("session")
         session = await session_service.get_session_by_id(session_id)
-        if session.coach_id == ctx.author.id:
-            await self.response_to_user(ctx, f"Вы не можете присоединиться к своей сессии.", ctx.channel)
-            return
         if not session:
             await self.response_to_user(ctx, f"Сессия {session_id} не найдена.", ctx.channel)
+            return
+        if session.coach_id == ctx.author.id:
+            await self.response_to_user(ctx, f"Вы не можете присоединиться к своей сессии.", ctx.channel)
             return
         if not session.is_active:
             await self.response_to_user(ctx, f"Сессия {session_id} еще не началась или уже завершена.", ctx.channel)
@@ -621,7 +621,9 @@ class SessionCommands(Cog):
             session_service = await self.service_factory.get_service("session")
             logger.info(f"Session service: {session_service}")
             session = await session_service.get_session_by_id(session_id)
-
+            if not session:
+                await self.response_to_user(ctx, f"Сессия {session_id} не найдена.", ctx.channel)
+                return
             if session.coach_id == ctx.author.id:
                 await self.response_to_user(ctx, f"Вы не можете покинуть свою сессию.", ctx.channel)
                 return
@@ -754,6 +756,7 @@ class SessionCommands(Cog):
                 if duration > 300 and user_id != session.coach_id:
                     try:
                         member = await ctx.guild.fetch_member(user_id)
+                        logger.info(f"Sending review message to {member.mention}")
                         await member.send(
                             message_content, view=review_session_view
                         )
