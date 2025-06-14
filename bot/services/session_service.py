@@ -106,8 +106,26 @@ class SessionService:
     async def get_user_session_activities(self, session_id: int, user_id: int) -> List[UserSessionActivity]:
         return await self.session_repo.get_user_session_activities(session_id, user_id)
 
-    async def get_session_activities(self, session_id: int) -> List[UserSessionActivity]:
-        return await self.session_repo.get_session_activities(session_id)
+    async def get_session_activities(self, session_id: int) -> Dict[int, float]:
+        logger.info(f"Getting session activities for session {session_id}")
+        try:
+            activities = await self.session_repo.get_session_activities(session_id)
+        except Exception as e:
+            logger.error(f"Error getting session activities: {e.with_traceback()}")
+            return {}
+        logger.info(f"Activities: {activities}")
+        activities_by_users = {}
+        for activity in activities:
+            if activity.user_id not in activities_by_users:
+                activities_by_users[activity.user_id] = []
+            activities_by_users[activity.user_id].append(activity)
+        logger.info(f"Activities by users: {activities_by_users}")
+        activities = {
+            user_id: sum(activity.duration for activity in activities_by_users[user_id])
+            for user_id in activities_by_users
+        }
+        logger.info(f"Activities: {activities}")
+        return activities
 
     async def calculate_user_activity(self, session_id: int, user_id: int) -> float:
         activities = await self.get_user_session_activities(session_id, user_id)
@@ -119,3 +137,11 @@ class SessionService:
         if session_type not in ("replay", "creative"):
             raise ValueError("Invalid session type")
         return await self.session_repo.get_user_sessions_count(user_id, session_type)
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.session_repo.close()
+        if exc_type:
+            await self.session_repo.session.rollback()

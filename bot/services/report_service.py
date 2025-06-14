@@ -149,11 +149,13 @@ class ReportService:
         for activity in session_activities:
             if activity['user_id'] not in unique_ids:
                 unique_ids.append(activity['user_id'])
+        coach_tier = self.session_data.get("coach_tier", "N/A")
+        logger.info(f"Coach tier: {coach_tier}")
         session_info = {
             "Сессия": self.session.id,
             "Тип": self.session.type,
             "Коуч": self.coach.name,
-            "Тир коуча": self.session_data["coach_tier"] if hasattr(self.session_data, "coach_tier") else "N/A",
+            "Тир коуча": coach_tier,
             "Дата": date.strftime("%d.%m.%Y") if date else "N/A",
             "Начало": start_time.strftime("%d.%m.%Y %H:%M:%S"),
             "Конец": end_time.strftime("%d.%m.%Y %H:%M:%S"),

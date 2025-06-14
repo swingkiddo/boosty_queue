@@ -127,3 +127,7 @@ class BaseRepository(Generic[T]):
         
         result = await self.session.execute(query)
         return result.scalar_one()
+
+    async def close(self):
+        """Закрытие сессии БД"""
+        await self.session.close()

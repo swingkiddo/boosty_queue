@@ -18,6 +18,16 @@ from logger import logger
 class SessionRepository(BaseRepository[Session]):
     def __init__(self, session: AsyncSession):
         super().__init__(session, Session)
+    
+    async def get_by_id(self, session_id: int) -> Optional[Session]:
+        query = select(Session).options(
+            selectinload(Session.requests),
+            selectinload(Session.reviews),
+            selectinload(Session.activities),
+            selectinload(Session.coach),
+        ).where(Session.id == session_id)
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
 
     async def get_all_sessions(self) -> List[Session]:
         query = select(Session).options(
