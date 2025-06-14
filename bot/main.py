@@ -4,10 +4,7 @@ import asyncio
 import discord
 from discord.ext import commands
 from factory import ServiceFactory
-from database.db import get_session, init_db
-from sqlalchemy.ext.asyncio import AsyncSession
-from commands import SessionCommands
-from discord.ext.commands import Cog
+from database.db import init_db
 from app.bot import BoostyQueueBot
 
 async def main():
@@ -15,8 +12,7 @@ async def main():
     Главная асинхронная функция для запуска бота.
     """
     try:
-        db_session = await get_session()
-        bot = BoostyQueueBot(db_session)
+        bot = BoostyQueueBot()
         async with bot:
             await bot.start(config.DISCORD_TOKEN)
     except discord.LoginFailure:
@@ -35,10 +31,4 @@ async def main():
             logger.info("Соединение с Discord закрыто.")
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        logger.info("Бот остановлен вручную.")
-    except Exception as e:
-        logger.info(e.with_traceback())
-        logger.error(f"Критическая ошибка при выполнении asyncio.run: {e}")
+    asyncio.run(main())

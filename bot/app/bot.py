@@ -1,7 +1,6 @@
 from datetime import datetime
 from discord import Intents, Member, VoiceState, VoiceChannel
 from discord.ext import commands
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from factory import ServiceFactory
 from commands import SessionCommands, UserCommands
@@ -15,14 +14,13 @@ class Channels(enum.Enum):
     SESSION_LOGS_CHANNEL = "📃・логи-сессий"
 
 class BoostyQueueBot(commands.Bot):
-    def __init__(self, session: AsyncSession):
+    def __init__(self):
         intents = Intents.default()
         intents.message_content = True
         intents.members = True
         intents.voice_states = True
         super().__init__(command_prefix='$', intents=intents)
-        self.session = session
-        self.service_factory = ServiceFactory(self.session)
+        self.service_factory = ServiceFactory()
         self.service_factory.init_discord_service(self)
         self.channel_states = {}
         self.guild = None
@@ -43,7 +41,7 @@ class BoostyQueueBot(commands.Bot):
 
     async def on_voice_state_update(self, member: Member, before: VoiceState, after: VoiceState):
         logger.info(f"Voice state update: {member} {before} {after}")
-        session_service = self.service_factory.get_service('session')
+        session_service = await self.service_factory.get_service('session')
 
         if after.channel is not None:
             if member.bot:
@@ -93,7 +91,7 @@ class BoostyQueueBot(commands.Bot):
             lost_roles = [role.name for role in before.roles if role not in after.roles]
             logger.info(f"Lost roles: {lost_roles}")
             logger.info("getting user_service")
-            user_service = self.service_factory.get_service('user')
+            user_service = await self.service_factory.get_service('user')
             logger.info(f"user_service: {user_service}")
             user = await user_service.get_user(after.id)
             if not user:
@@ -144,15 +142,46 @@ class BoostyQueueBot(commands.Bot):
                     logger.info(f"Creating session logs channel: {Channels.SESSION_LOGS_CHANNEL.value}")
                     await self.guild.create_text_channel(Channels.SESSION_LOGS_CHANNEL.value, category=category, overwrites=admin_overwrites)
 
-                user_service = self.service_factory.get_service('user')
+                user_service = await self.service_factory.get_service('user')
                 for member in self.guild.members:
+                    roles = [role.name for role in member.roles]
                     if member.bot:
                         continue
-                    if Roles.SUB in [role.name for role in member.roles]:
+                    if Roles.SUB in roles:
                         user = await user_service.get_user(member.id)
                         join_date = member.joined_at.replace(tzinfo=None)
                         if not user:
-                                await user_service.create_user(member.id, member.name, join_date=join_date)
+                            await user_service.create_user(member.id, member.name, join_date=join_date)
+                    if Roles.COACH_T1 in roles or Roles.COACH_T2 in roles or Roles.COACH_T3 in roles:
+                        coach_tier = Roles.COACH_T1 if Roles.COACH_T1 in roles else Roles.COACH_T2 if Roles.COACH_T2 in roles else Roles.COACH_T3
+                        user = await user_service.get_user(member.id)
+                        if not user:
+                            await user_service.create_user(member.id, member.name, join_date=join_date, coach_tier=coach_tier)
+                        else:
+                            await user_service.update_user(member.id, coach_tier=coach_tier)
+                session_service = await self.service_factory.get_service('session')
+                session_id = 4
+                session = await session_service.get_session_by_id(session_id)
+                logger.info(f"Getting session activities for session {session_id}")
+                activities = await session_service.get_session_activities(session_id)
+                logger.info(f"Activities: {activities}")
+                from ui.session_view import ReviewSessionView
+                
+                review_session_view = ReviewSessionView(
+                    session, session_service, user_service
+                )
+                coach = self.guild.get_member(session.coach_id)
+                text = f"Сессия {session_id} завершена. Коуч: {coach.mention}. Оцени сессию."
+
+                for user_id, duration in activities.items():
+                    member = self.guild.get_member(user_id)
+                    logger.info(f"Member: {member.name} {duration}")
+                    if member.name == "koochamala":
+                        await member.send(text, view=review_session_view)
+                    if duration > 300 and member.id != session.coach_id:
+                        if member:
+                            await member.send(text, view=review_session_view)
+                            logger.info(f"Sent review session view to {member.name}")
 
         except Exception as e:
             logger.error(f"Error on_ready: {e}")
