@@ -6,11 +6,11 @@ class UserCommands(Cog):
     def __init__(self, bot: commands.Bot, service_factory: ServiceFactory):
         self.bot = bot
         self.service_factory = service_factory
-        self.user_service = service_factory.get_service('user')
 
     @commands.hybrid_command(name="stats")
     async def stats(self, ctx: commands.Context):
-        user = await self.user_service.get_user(ctx.author.id)
+        user_service = await self.service_factory.get_service("user")
+        user = await user_service.get_user(ctx.author.id)
         if not user:
             await ctx.send("You are not registered in the bot")
             return

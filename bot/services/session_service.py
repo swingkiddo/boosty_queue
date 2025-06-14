@@ -5,6 +5,8 @@ from typing import List, Optional, Dict, Any
 from logger import logger
 import pandas as pd
 from io import BytesIO
+import discord
+from discord import Guild
 
 class SessionService:
     def __init__(self, session_repo: SessionRepository):
@@ -138,10 +140,9 @@ class SessionService:
             raise ValueError("Invalid session type")
         return await self.session_repo.get_user_sessions_count(user_id, session_type)
 
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        await self.session_repo.close()
-        if exc_type:
-            await self.session_repo.session.rollback()
+    async def get_queue_participants(self, guild: Guild, session_id: int) -> List[discord.Member]:
+        requests = await self.get_requests_by_session_id(session_id)
+        requests = [request for request in requests if request.status == SessionRequestStatus.PENDING.value]
+        user_ids = [request.user_id for request in requests]
+        members = [member for member in guild.members if member.id in user_ids]
+        return members

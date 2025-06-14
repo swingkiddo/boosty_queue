@@ -2,7 +2,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from discord.ext import commands
 from repositories import *
 from services import *
-from database.db import get_session
+from database.db import get_db_session
 
 class ServiceFactory:
     """Фабрика для создания сервисов"""
@@ -22,21 +22,14 @@ class ServiceFactory:
         if service_name == 'discord':
             return self._services['discord']
         
-        # Для каждого запроса создаем новую сессию БД
-        session = await get_session()
-        
-        if service_name == 'user':
-            user_repo = UserRepository(session)
-            return UserService(user_repo)
-        elif service_name == 'session':
-            session_repo = SessionRepository(session)
-            return SessionService(session_repo)
-        
-        raise ValueError(f"Service {service_name} not found")
+        async with get_db_session() as session:
+            if service_name == 'user':
+                user_repo = UserRepository(session)
+                service = UserService(user_repo)
+                return service
+            elif service_name == 'session':
+                session_repo = SessionRepository(session)
+                service = SessionService(session_repo)
+                return service
 
-    async def get_services(self):
-        return (
-            await self.get_service("user"), 
-            await self.get_service("session"), 
-            await self.get_service("discord")
-        )
+            raise ValueError(f"Service {service_name} not found")

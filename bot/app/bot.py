@@ -123,7 +123,7 @@ class BoostyQueueBot(commands.Bot):
 
             if self.guild:
                 synced = await self.tree.sync()
-                
+                logger.info(f"Synced commands: {synced}")
                 roles_manager = RolesManager(self.guild)
                 await roles_manager.check_roles()
                 
@@ -159,29 +159,29 @@ class BoostyQueueBot(commands.Bot):
                             await user_service.create_user(member.id, member.name, join_date=join_date, coach_tier=coach_tier)
                         else:
                             await user_service.update_user(member.id, coach_tier=coach_tier)
-                session_service = await self.service_factory.get_service('session')
-                session_id = 4
-                session = await session_service.get_session_by_id(session_id)
-                logger.info(f"Getting session activities for session {session_id}")
-                activities = await session_service.get_session_activities(session_id)
-                logger.info(f"Activities: {activities}")
-                from ui.session_view import ReviewSessionView
+                # session_service = await self.service_factory.get_service('session')
+                # session_id = 4
+                # session = await session_service.get_session_by_id(session_id)
+                # logger.info(f"Getting session activities for session {session_id}")
+                # activities = await session_service.get_session_activities(session_id)
+                # logger.info(f"Activities: {activities}")
+                # from ui.session_view import ReviewSessionView
                 
-                review_session_view = ReviewSessionView(
-                    session, session_service, user_service
-                )
-                coach = self.guild.get_member(session.coach_id)
-                text = f"Сессия {session_id} завершена. Коуч: {coach.mention}. Оцени сессию."
+                # review_session_view = ReviewSessionView(
+                #     session, session_service, user_service
+                # )
+                # coach = self.guild.get_member(session.coach_id)
+                # text = f"Сессия {session_id} завершена. Коуч: {coach.mention}. Оцени сессию."
 
-                for user_id, duration in activities.items():
-                    member = self.guild.get_member(user_id)
-                    logger.info(f"Member: {member.name} {duration}")
-                    if member.name == "koochamala":
-                        await member.send(text, view=review_session_view)
-                    if duration > 300 and member.id != session.coach_id:
-                        if member:
-                            await member.send(text, view=review_session_view)
-                            logger.info(f"Sent review session view to {member.name}")
+                # for user_id, duration in activities.items():
+                #     member = self.guild.get_member(user_id)
+                #     logger.info(f"Member: {member.name} {duration}")
+                #     if member.name == "koochamala":
+                #         await member.send(text, view=review_session_view)
+                #     if duration > 300 and member.id != session.coach_id:
+                #         if member:
+                #             await member.send(text, view=review_session_view)
+                #             logger.info(f"Sent review session view to {member.name}")
 
         except Exception as e:
             logger.error(f"Error on_ready: {e}")
