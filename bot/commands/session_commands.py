@@ -66,14 +66,17 @@ class SessionCommands(Cog):
     async def response_to_user(
         self, ctx: commands.Context, message: str, channel: TextChannel = None
     ):
-        if ctx.interaction and not channel:
-            await ctx.interaction.response.send_message(message, ephemeral=True)
+        if ctx.interaction:
+            if not ctx.interaction.response.is_done():
+                await ctx.interaction.response.send_message(message, ephemeral=True)
+            else:
+                await ctx.interaction.followup.send(message, ephemeral=True)
         else:
             await ctx.send(message) if not channel else await channel.send(message)
 
     @commands.command(name="test")
     async def test(self, ctx: commands.Context):
-        user_service = self.service_factory.get_service("user")
+        user_service = await self.service_factory.get_service("user")
         logger.info(f"ctx.author.id: {ctx.author.id}")
         users = await user_service.get_users_by_ids([ctx.author.id])
         logger.info(f"users: {users}")
@@ -104,18 +107,21 @@ class SessionCommands(Cog):
                 await self.response_to_user(
                     ctx,
                     "Вы не можете создать сессию в этом канале. Пожалуйста, используйте канал 'запуск-сессии'.",
+                    ctx.channel,
                 )
                 return
             if session_type not in ["replay", "creative"]:
                 await self.response_to_user(
                     ctx,
                     "Неверный тип сессии. Пожалуйста, используйте 'replay' или 'creative'.",
+                    ctx.channel,
                 )
                 return
             if max_slots > 25:
                 await self.response_to_user(
                     ctx,
                     "Максимальное количество участников в сессии - 25.",
+                    ctx.channel,
                 )
                 return
 
@@ -124,9 +130,9 @@ class SessionCommands(Cog):
             roles_manager = RolesManager(guild)
             await roles_manager.check_roles()
 
-            user_service = self.service_factory.get_service("user")
-            session_service = self.service_factory.get_service("session")
-            discord_service = self.service_factory.get_service("discord")
+            user_service = await self.service_factory.get_service("user")
+            session_service = await self.service_factory.get_service("session")
+            discord_service = await self.service_factory.get_service("discord")
 
             coach = await user_service.get_user(author.id)
             if not coach:
@@ -205,10 +211,9 @@ class SessionCommands(Cog):
     async def start_session(self, ctx: commands.Context):
         logger.info(f"Starting session for {ctx.guild.name}")
         try:
-            user_service, session_service, discord_service = (
-                self.service_factory.get_services()
-            )
-            session_service = self.service_factory.get_service("session")
+            user_service = await self.service_factory.get_service("user")
+            session_service = await self.service_factory.get_service("session")
+            discord_service = await self.service_factory.get_service("discord")
             guild = ctx.guild
             active_sessions = await session_service.get_active_sessions_by_coach_id(
                 ctx.author.id
@@ -336,7 +341,7 @@ class SessionCommands(Cog):
     @commands.has_any_role(Roles.MOD)
     async def delete_channels(self, ctx: commands.Context):
         logger.info(f"Deleting channels for {ctx.guild.name}")
-        session_service = self.service_factory.get_service("session")
+        session_service = await self.service_factory.get_service("session")
         try:
             guild = ctx.guild
             categories = guild.categories
@@ -374,8 +379,8 @@ class SessionCommands(Cog):
 
     async def prepare_session_report(self, guild: Guild, session: Session):
         try:
-            session_service = self.service_factory.get_service("session")
-            user_service = self.service_factory.get_service("user")
+            session_service = await self.service_factory.get_service("session")
+            user_service = await self.service_factory.get_service("user")
             session_data = await session_service.get_session_data(session.id)
             coach_db = await user_service.get_user(session.coach_id)
             session_data["coach_tier"] = coach_db.coach_tier
@@ -407,8 +412,8 @@ class SessionCommands(Cog):
             f"Attempting to end session for coach {ctx.author.name} in guild {ctx.guild.name}"
         )
         try:
-            user_service = self.service_factory.get_service("user")
-            session_service = self.service_factory.get_service("session")
+            user_service = await self.service_factory.get_service("user")
+            session_service = await self.service_factory.get_service("session")
             
             active_sessions = await session_service.get_active_sessions_by_coach_id(
                 ctx.author.id
@@ -466,6 +471,7 @@ class SessionCommands(Cog):
             review_session_view = ReviewSessionView(
                 active_session, session_service, user_service
             )
+            await text_channel.send(message_content, view=review_session_view)
             session_activities = await session_service.get_session_activities(
                 active_session.id
             )
@@ -512,11 +518,142 @@ class SessionCommands(Cog):
             else:
                 await ctx.send(error_message)
 
+    @commands.hybrid_command(name="queue")
+    @commands.has_any_role(Roles.SUB)
+    async def join_queue(self, ctx: commands.Context, session_id: int):
+        logger.info(f"Joining queue for {ctx.author.name}")
+        session_service = await self.service_factory.get_service("session")
+        session = await session_service.get_session_by_id(session_id)
+        if session.coach_id == ctx.author.id:
+            await self.response_to_user(ctx, f"Вы не можете присоединиться к своей сессии.", ctx.channel)
+            return
+        if not session:
+            await self.response_to_user(ctx, f"Сессия {session_id} не найдена.", ctx.channel)
+            return
+        if session and session.is_active:
+            await self.response_to_user(ctx, f"Сессия {session_id} уже началась. Используйте /join, если есть свободные слоты.", ctx.channel)
+            return
+        request = await session_service.get_request_by_user_id(session.id, ctx.author.id)
+        if not request:
+            request = await session_service.create_request(session_id, ctx.author.id)
+        else:
+            await self.response_to_user(ctx, f"Вы уже в очереди на сессию {session.id}", ctx.channel)
+            return
+        guild = ctx.guild
+        coach = await guild.fetch_member(session.coach_id)
+        channel = await guild.fetch_channel(session.text_channel_id)
+        queue_message = await channel.fetch_message(session.info_message_id)
+        queue_embed = SessionQueueEmbed(coach, session.id)
+        members = await session_service.get_queue_participants(guild, session.id)
+        queue_embed.update_queue(members)
+        await queue_message.edit(embed=queue_embed)
+        await self.response_to_user(ctx, f"Вы успешно присоединились к очереди на сессию {session.id}", ctx.channel)
+
+    @commands.hybrid_command(name="leave")
+    @commands.has_any_role(Roles.SUB)
+    async def leave_queue(self, ctx: commands.Context, session_id: int):
+        logger.info(f"Leaving queue for {ctx.author.name}")
+        session_service = await self.service_factory.get_service("session")
+        session = await session_service.get_session_by_id(session_id)
+        if session.coach_id == ctx.author.id:
+            await self.response_to_user(ctx, f"Вы не можете покинуть очередь на свою сессию.", ctx.channel)
+            return
+        if session.is_active:
+            await self.response_to_user(ctx, f"Сессия {session_id} уже началась, вы не можете покинуть очередь.", ctx.channel)
+            return
+        if not session:
+            await self.response_to_user(ctx, f"Сессия {session_id} не найдена.", ctx.channel)
+            return
+        request = await session_service.get_request_by_user_id(session.id, ctx.author.id)
+        if not request:
+            await self.response_to_user(ctx, f"Вы не в очереди на сессию {session.id}", ctx.channel)
+            return
+
+        if request.status == SessionRequestStatus.PENDING.value:
+            await session_service.delete_request(request.id)
+        coach = await ctx.guild.fetch_member(session.coach_id)
+        channel = await ctx.guild.fetch_channel(session.text_channel_id)
+        queue_message = await channel.fetch_message(session.info_message_id)
+        queue_embed = SessionQueueEmbed(coach, session.id)
+        members = await session_service.get_queue_participants(ctx.guild, session.id)
+        queue_embed.update_queue(members)
+        await queue_message.edit(embed=queue_embed)
+
+        await self.response_to_user(ctx, f"Вы успешно покинули очередь на сессию {session.id}", ctx.channel)
+
+    @commands.hybrid_command(name="join")
+    @commands.has_any_role(Roles.SUB)
+    async def join_session(self, ctx: commands.Context, session_id: int):
+        logger.info(f"Joining session {session_id}")
+        session_service = await self.service_factory.get_service("session")
+        session = await session_service.get_session_by_id(session_id)
+        if session.coach_id == ctx.author.id:
+            await self.response_to_user(ctx, f"Вы не можете присоединиться к своей сессии.", ctx.channel)
+            return
+        if not session:
+            await self.response_to_user(ctx, f"Сессия {session_id} не найдена.", ctx.channel)
+            return
+        if not session.is_active:
+            await self.response_to_user(ctx, f"Сессия {session_id} еще не началась или уже завершена.", ctx.channel)
+            return
+        if session.coach_id != ctx.author.id:
+            await self.response_to_user(ctx, f"Вы не можете присоединиться к сессии {session_id}.", ctx.channel)
+            return
+        accepted_requests = await session_service.get_accepted_requests_by_session_id(session.id)
+        if len(accepted_requests) >= session.max_slots:
+            await self.response_to_user(ctx, "Все слоты заняты.", ctx.channel)
+            return
+
+        request = await session_service.get_request_by_user_id(session.id, ctx.author.id)
+        if request and request.status == SessionRequestStatus.ACCEPTED.value:
+            await self.response_to_user(ctx, f"Вы уже присоединились к сессии {session.id}", ctx.channel)
+            return
+
+        if not request:
+            request = await session_service.create_request(session.id, ctx.author.id)
+        await session_service.update_request_status(request.id, SessionRequestStatus.ACCEPTED)
+
+        requests = await session_service.get_accepted_requests_by_session_id(session.id)
+        participants = [ctx.guild.get_member(request.user_id) for request in requests]
+        embed = SessionEmbed(participants, session.id, session.max_slots)
+        channel = await ctx.guild.fetch_channel(session.text_channel_id)
+        message = await channel.fetch_message(session.session_message_id)
+        await message.edit(embed=embed)
+        await self.response_to_user(ctx, f"Вы присоединились к сессии {session.id}", ctx.channel)
+
+    @commands.hybrid_command(name="quit")
+    @commands.has_any_role(Roles.SUB)
+    async def quit_session(self, ctx: commands.Context, session_id: int):
+        try:
+            logger.info(f"Quitting session {session_id}")
+            session_service = await self.service_factory.get_service("session")
+            logger.info(f"Session service: {session_service}")
+            session = await session_service.get_session_by_id(session_id)
+
+            if session.coach_id == ctx.author.id:
+                await self.response_to_user(ctx, f"Вы не можете покинуть свою сессию.", ctx.channel)
+                return
+            request = await session_service.get_request_by_user_id(session.id, ctx.author.id)
+            if not request:
+                await self.response_to_user(ctx, f"Вы не участвуете в сессии {session.id}.", ctx.channel)
+                return
+            await session_service.update_request_status(request.id, SessionRequestStatus.REJECTED)
+            requests = await session_service.get_accepted_requests_by_session_id(session.id)
+            participants = [ctx.guild.get_member(request.user_id) for request in requests]
+            embed = SessionEmbed(participants, session.id, session.max_slots)
+            channel = await ctx.guild.fetch_channel(session.text_channel_id)
+            message = await channel.fetch_message(session.session_message_id)
+            await message.edit(embed=embed)
+            await self.response_to_user(ctx, f"Вы покинули сессию {session.id}", ctx.channel)
+        except Exception as e:
+            logger.error(f"Error quitting session: {e.with_traceback()}")
+            await self.response_to_user(ctx, f"Произошла ошибка при покидании сессии {session.id}. Пожалуйста, попробуйте позже.", ctx.channel)
+
     @commands.hybrid_command(name="force_end")
     @commands.has_any_role(Roles.MOD, Roles.COACH_T1, Roles.COACH_T2, Roles.COACH_T3)
     async def force_end_session(self, ctx: commands.Context, session_id: int):
         logger.info(f"Force ending session {session_id}")
-        session_service = self.service_factory.get_service("session")
+        session_service = await self.service_factory.get_service("session")
         session = await session_service.get_session_by_id(session_id)
         if session.coach_id != ctx.author.id:
             await self.response_to_user(
@@ -534,8 +671,8 @@ class SessionCommands(Cog):
         logger.info(f"Sending report for session {session_id}")
         if ctx.author.id not in [config.ADMIN_ID, config.DEVELOPER_ID]:
             return
-        user_service = self.service_factory.get_service("user")
-        session_service = self.service_factory.get_service("session")
+        user_service = await self.service_factory.get_service("user")
+        session_service = await self.service_factory.get_service("session")
         if session_id:
             session = await session_service.get_session_by_id(session_id)
         else:
@@ -591,26 +728,24 @@ class SessionCommands(Cog):
             logger.error(f"Error sending report: {e.with_traceback()}")
             await ctx.send(
                 "Произошла ошибка при отправке отчёта. Пожалуйста, попробуйте позже."
-            )
+            ) 
 
-    @commands.command(name="review")
-    async def review_session(self, ctx: commands.Context, session_id: int):
-        try:
-            logger.info(f"Reviewing session {session_id}")
-            session_service = self.service_factory.get_service("session")
-            logger.info(f"Session service: {session_service}")
-            session = await session_service.get_session_by_id(session_id)
-            logger.info(f"Session: {session}")
-            activities = await session_service.get_session_activities(session_id)
-            logger.info(f"Activities: {activities}")
-            if session.coach_id != ctx.author.id:
-                await self.response_to_user(ctx, "Вы не можете оценить эту сессию.", ctx.channel)
-            review_session_view = ReviewSessionView(
-                session, session_service, user_service
-            )
-            for activity in activities: 
-                logger.info(f"Activity: {activity}")
-            # await ctx.send(view=review_session_view)
-        except Exception as e:
-            logger.error(f"Error reviewing session: {e.with_traceback()}")
-            await self.response_to_user(ctx, "Произошла ошибка при оценке сессии. Пожалуйста, попробуйте позже.", ctx.channel)
+    # @commands.command(name="review")
+    # async def review_session(self, ctx: commands.Context, session_id: int):
+    #     try:
+    #         logger.info(f"Reviewing session {session_id}")
+    #         session_service = self.service_factory.get_service("session")
+    #         logger.info(f"Session service: {session_service}")
+    #         session = await session_service.get_session_by_id(session_id)
+    #         logger.info(f"Session: {session}")
+    #         activities = await session_service.get_session_activities(session_id)
+    #         logger.info(f"Activities: {activities}")
+    #         review_session_view = ReviewSessionView(
+    #             session, session_service, user_service
+    #         )
+    #         for activity in activities: 
+    #             logger.info(f"Activity: {activity}")
+    #         # await ctx.send(view=review_session_view)
+    #     except Exception as e:
+    #         logger.error(f"Error reviewing session: {e.with_traceback()}")
+    #         await self.response_to_user(ctx, "Произошла ошибка при оценке сессии. Пожалуйста, попробуйте позже.", ctx.channel)
