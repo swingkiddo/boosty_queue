@@ -5,9 +5,33 @@ from models.base import Base
 from models.user import User
 from datetime import datetime, timedelta
 from sqlalchemy import select, insert
-engine = create_async_engine(config.DATABASE_URL, echo=False)
+from contextlib import asynccontextmanager
+
+# Настройки пула соединений
+engine = create_async_engine(
+    config.DATABASE_URL, 
+    echo=False,
+    pool_size=10,          # Размер пула соединений
+    max_overflow=20,       # Максимальное количество дополнительных соединений
+    pool_timeout=30,       # Таймаут ожидания соединения
+    pool_recycle=3600,     # Переиспользование соединений каждый час
+    pool_pre_ping=True     # Проверка соединения перед использованием
+)
 
 async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+@asynccontextmanager
+async def get_db_session():
+    """Контекстный менеджер для безопасной работы с сессией БД"""
+    async with async_session() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
 
 async def init_db():
     async with engine.begin() as conn:
@@ -60,8 +84,8 @@ async def init_db():
         for user in test_user:
             if user["id"] not in user_ids:
                 await conn.execute(insert(User).values(user))
-        
 
 async def get_session() -> AsyncSession:
+    """Создает новую сессию БД для каждого вызова"""
     return async_session()
 
