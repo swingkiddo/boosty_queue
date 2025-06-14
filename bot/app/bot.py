@@ -33,7 +33,7 @@ class BoostyQueueBot(commands.Bot):
         return channel.category and channel.category.name.startswith("Сессия")
 
     async def handle_voice_channel_join(self, member: Member, voice_ch: VoiceChannel):
-        session_service = self.service_factory.get_service('session')
+        session_service = await self.service_factory.get_service('session')
         session_id = int(voice_ch.category.name.split(" ")[1])
         await session_service.create_user_session_activity(session_id, member.id, join_time=datetime.now())
         logger.info(f"User {member.name} joined session {session_id}")

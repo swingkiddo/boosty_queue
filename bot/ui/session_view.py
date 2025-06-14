@@ -360,14 +360,15 @@ class LikeButton(Button):
         self.user_service = user_service
 
     async def callback(self, interaction: discord.Interaction):
-        logger.info(f"LikeButton callback called for session {self.session.id}")
+        logger.info(f"LikeButton callback called for session {self.session.id} by user {interaction.user.id}")
         await interaction.response.defer()
         try:
             user = interaction.user
             if user.id == self.session.coach_id:
                 await interaction.followup.send("Вы не можете оценивать себя.", ephemeral=True)
                 return
-            if user.id not in self.activities or self.activities[user.id] < 300:
+            activities = await self.session_service.get_session_activities(self.session.id)
+            if user.id not in activities or activities[user.id] < 300:
                 await interaction.followup.send("Вы должны провести хотя бы 5 минут в сессии, чтобы оценить её.", ephemeral=True)
                 return
             reviews = await self.session_service.get_reviews_by_session_id(self.session.id)
@@ -396,13 +397,11 @@ class DislikeButton(Button):
             if user.id == self.session.coach_id:
                 await interaction.followup.send("Вы не можете оценивать себя.", ephemeral=True)
                 return
-            if user.id not in self.activities or self.activities[user.id] < 300:
+            activities = await self.session_service.get_session_activities(self.session.id)
+            if user.id not in activities or activities[user.id] < 300:
                 await interaction.followup.send("Вы должны провести хотя бы 5 минут в сессии, чтобы оценить её.", ephemeral=True)
                 return
-            # user_activity = await self.session_service.calculate_user_activity(self.session.id, user.id)
-            # if user_activity < 300:
-            #     await interaction.followup.send("Вы должны провести хотя бы 5 минут в сессии, чтобы оценить её.", ephemeral=True)
-            #     return
+
             reviews = await self.session_service.get_reviews_by_session_id(self.session.id)
             logger.info(f"Reviews: {reviews}")
             review = next((r for r in reviews if r.user_id == user.id), None)
