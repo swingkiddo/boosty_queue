@@ -1,9 +1,8 @@
+import discord
 from .session_view import (
     SessionQueueView,
-    JoinSessionButton,
-    SessionQueueEmbed,
+    JoinQueueButton,
     SessionView,
-    SessionEmbed,
     EndSessionConfirmationView,
     AllParticipantsReviewedButton,
     NotAllParticipantsReviewedButton,
@@ -15,9 +14,11 @@ from .session_view import (
     DislikeButton
 )
 
+from .embeds import SessionQueueEmbed, SessionEmbed
+
 __all__ = [
     "SessionQueueView",
-    "JoinSessionButton",
+    "JoinQueueButton",
     "SessionQueueEmbed",
     "SessionView",
     "SessionEmbed",

@@ -6,6 +6,7 @@ from services import SessionService, DiscordService, UserService
 from factory import ServiceFactory
 from logger import logger
 from datetime import datetime, timedelta
+from .buttons import JoinQueueButton, CancelQueueButton, JoinSessionButton, QuitSessionButton
 
 class SessionQueueView(View):
     def __init__(self, session: Session, session_service: SessionService, discord_service: DiscordService, user_service: UserService):
@@ -14,141 +15,8 @@ class SessionQueueView(View):
         self.session_service = session_service
         self.discord_service = discord_service
         self.user_service = user_service
-        self.add_item(JoinSessionButton(session, session_service, user_service))
-        self.add_item(CancelSessionButton(session, session_service, user_service))
-
-class JoinSessionButton(Button):
-    def __init__(self, session: Session, session_service: SessionService, user_service: UserService):
-        super().__init__(label="🏃 В очередь", style=discord.ButtonStyle.success, custom_id="join_session")
-        self.session = session
-        self.session_service = session_service
-        self.user_service = user_service
-        
-    async def callback(self, interaction: discord.Interaction):
-        try:
-            if interaction.user.id == self.session.coach_id:
-                await interaction.response.send_message("Вы не можете присоединиться к своей сессии", ephemeral=True)
-                return
-            guild = interaction.guild
-            members = guild.members
-            info_message = interaction.message
-
-            participant = await self.user_service.get_user(interaction.user.id)
-            if not participant:
-                participant = await self.user_service.create_user(interaction.user.id, interaction.user.name, join_date=interaction.user.joined_at.replace(tzinfo=None))
-
-            request = await self.session_service.get_request_by_user_id(self.session.id, participant.id)
-            if request:
-                await interaction.response.send_message("Вы уже в очереди", ephemeral=True)
-                return
-
-            request = await self.session_service.create_request(self.session.id, participant.id)
-            requests = await self.session_service.get_requests_by_session_id(self.session.id)
-            requests = [request for request in requests if request.status == SessionRequestStatus.PENDING.value]
-            user_ids = [request.user_id for request in requests]
-            members = [member for member in members if member.id in user_ids]
-
-            coach = await guild.fetch_member(self.session.coach_id)
-            embed = SessionQueueEmbed(coach, self.session.id)
-            embed.update_queue(members)
-
-            await info_message.edit(embed=embed)
-            await interaction.response.send_message("Вы присоединились к сессии", ephemeral=True)
-        except discord.Forbidden:
-            await interaction.response.send_message("У меня нет прав на редактирование этого сообщения", ephemeral=True)
-        except discord.HTTPException:
-            await interaction.response.send_message("Произошла ошибка при присоединении к сессии", ephemeral=True)
-        except discord.NotFound:
-            await interaction.response.send_message("Сообщение не найдено", ephemeral=True)
-        except Exception as e:
-            import traceback
-            logger.error(f"Error joining session: {traceback.format_exc()}")
-            await interaction.response.send_message("Произошла ошибка при присоединении к сессии", ephemeral=True)
-
-class CancelSessionButton(Button):
-    def __init__(self, session: Session, session_service: SessionService, user_service: UserService):
-        super().__init__(label="❌ Выйти", style=discord.ButtonStyle.danger, custom_id="cancel_session")
-        self.session = session
-        self.session_service = session_service
-        self.user_service = user_service
-
-    async def callback(self, interaction: discord.Interaction):
-        try:
-            guild = interaction.guild
-            all_guild_members = guild.members # Store all members for reliable filtering
-            info_message = interaction.message
-
-            participant = await self.user_service.get_user(interaction.user.id)
-            if not participant:
-                participant = await self.user_service.create_user(interaction.user.id, interaction.user.name, join_date=interaction.user.joined_at.replace(tzinfo=None))
-
-            request = await self.session_service.get_request_by_user_id(self.session.id, participant.id)
-
-            if not request:
-                await interaction.response.send_message("Вы не присоединились к этой сессии", ephemeral=True)
-                return
-
-            response_message_content = ""
-            refresh_embed = False
-
-            if request.status == SessionRequestStatus.PENDING.value:
-                await self.session_service.delete_request(request.id)
-                response_message_content = "Вы отменили свою заявку на участие в сессии."
-                refresh_embed = True
-            else:
-                response_message_content = f"Ваша заявка не может быть отменена, так как её текущий статус: '{request.status}'. Очередь не была изменена для вас."
-                # Embed will still be refreshed to show current state, as per original logic.
-                refresh_embed = True
-
-            # Always refresh the embed to show the current state of the queue
-            # This was the original behavior: embed is updated regardless of whether the specific user's request was PENDING.
-            current_session_requests = await self.session_service.get_requests_by_session_id(self.session.id)
-            pending_user_ids = [req.user_id for req in current_session_requests if req.status == SessionRequestStatus.PENDING.value]
-            
-            # Filter from the complete list of guild members
-            actual_pending_members = [member for member in all_guild_members if member.id in pending_user_ids]
-            
-            coach = await guild.fetch_member(self.session.coach_id)
-            embed = SessionQueueEmbed(coach, self.session.id)
-            embed.update_queue(actual_pending_members)
-            await info_message.edit(embed=embed)
-
-            # Send the single, appropriate response to the interaction
-            await interaction.response.send_message(response_message_content, ephemeral=True)
-
-        except discord.Forbidden:
-            # Check if interaction already responded to, common in error handling
-            if interaction and not interaction.response.is_done():
-                await interaction.response.send_message("У меня нет прав на выполнение этого действия.", ephemeral=True)
-            else:
-                await interaction.followup.send("У меня нет прав на выполнение этого действия.", ephemeral=True)
-        except discord.HTTPException:
-            if interaction and not interaction.response.is_done():
-                await interaction.response.send_message("Произошла ошибка сети при отмене заявки.", ephemeral=True)
-            else:
-                await interaction.followup.send("Произошла ошибка сети при отмене заявки.", ephemeral=True)
-        except discord.NotFound:
-            if interaction and not interaction.response.is_done():
-                await interaction.response.send_message("Необходимые данные не найдены для отмены заявки.", ephemeral=True)
-            else:
-                await interaction.followup.send("Необходимые данные не найдены для отмены заявки.", ephemeral=True)
-        except Exception as e:
-            import traceback
-            logger.error(f"Error canceling session: {traceback.format_exc()}")
-            if interaction and not interaction.response.is_done():
-                await interaction.response.send_message("Произошла непредвиденная ошибка при отмене заявки на участие в сессии.", ephemeral=True)
-            elif interaction: # If deferred or already responded, use followup
-                await interaction.followup.send("Произошла непредвиденная ошибка при отмене заявки на участие в сессии.", ephemeral=True)
-
-class SessionQueueEmbed(discord.Embed):
-    def __init__(self, coach, session_id: int):
-        super().__init__(title=f"Очередь на сессию {session_id}")
-        self.coach = coach
-        self.add_field(name="Коуч", value=coach.mention, inline=False)
-        self.add_field(name="Очередь", value="", inline=False)
-
-    def update_queue(self, queue: list[discord.Member]):
-        self.set_field_at(1, name="Очередь", value="\n".join([member.mention for member in queue]))
+        self.add_item(JoinQueueButton(session, session_service, user_service))
+        self.add_item(CancelQueueButton(session, session_service, user_service))
 
 class SessionView(View):
     def __init__(self, session: Session, session_service: SessionService, discord_service: DiscordService, user_service: UserService):
@@ -157,95 +25,9 @@ class SessionView(View):
         self.session_service = session_service
         self.discord_service = discord_service
         self.user_service = user_service
-        self.add_item(QuickJoinButton(session, session_service, user_service))
+        self.add_item(JoinSessionButton(session, session_service, user_service))
         self.add_item(QuitSessionButton(session, session_service, user_service))
 
-class QuickJoinButton(Button):
-    def __init__(self, session: Session, session_service: SessionService, user_service: UserService):
-        super().__init__(label="Присоединиться", style=discord.ButtonStyle.success, custom_id="quick_join")
-        self.session = session
-        self.session_service = session_service
-        self.user_service = user_service
-
-    async def callback(self, interaction: discord.Interaction):
-        await interaction.response.defer()
-        try:
-            user = interaction.user
-            if user.id == self.session.coach_id:
-                await interaction.followup.send("Вы не можете присоединиться к своей сессии", ephemeral=True)
-                return
-            message = interaction.message
-            requests = await self.session_service.get_accepted_requests_by_session_id(self.session.id)
-            accepted_requests = [request for request in requests if request.status == SessionRequestStatus.ACCEPTED.value]
-            if len(accepted_requests) >= self.session.max_slots:
-                await interaction.followup.send("В очереди уже достаточно участников", ephemeral=True)
-                return
-
-            request = await self.session_service.get_request_by_user_id(self.session.id, user.id)
-            if request and request.status == SessionRequestStatus.ACCEPTED.value:
-                await interaction.followup.send("Вы уже участвуете в сессии", ephemeral=True)
-                return
-
-            if request and (request.status == SessionRequestStatus.REJECTED.value or request.status == SessionRequestStatus.PENDING.value):
-                await self.session_service.update_request_status(request.id, SessionRequestStatus.ACCEPTED)
-            
-            if not request:
-                request = await self.session_service.create_request(self.session.id, user.id)
-                await self.session_service.update_request_status(request.id, SessionRequestStatus.ACCEPTED)
-                
-            requests = await self.session_service.get_requests_by_session_id(self.session.id)
-            accepted_requests = [request for request in requests if request.status == SessionRequestStatus.ACCEPTED.value]
-            participants = [interaction.guild.get_member(request.user_id) for request in accepted_requests]
-            await interaction.followup.send(f"Вы присоединились к сессии", ephemeral=True)
-            embed = SessionEmbed(participants, self.session.id, self.session.max_slots)
-            await message.edit(embed=embed)
-        except Exception as e:
-            logger.error(f"Error in QuickJoinButton: {e.with_traceback()}")
-            await interaction.followup.send("Произошла ошибка при присоединении к сессии", ephemeral=True)
-
-class QuitSessionButton(Button):
-    def __init__(self, session: Session, session_service: SessionService, user_service: UserService):
-        super().__init__(label="Освободить слот", style=discord.ButtonStyle.danger, custom_id="quit_session")
-        self.session = session
-        self.session_service = session_service
-        self.user_service = user_service
-
-    async def callback(self, interaction: discord.Interaction):
-        await interaction.response.defer()
-        try:
-            message = interaction.message
-            user = interaction.user
-            request = await self.session_service.get_request_by_user_id(self.session.id, user.id)
-            if not request:
-                await interaction.followup.send("Вы не участвуете в этой сессии", ephemeral=True)
-                return
-            await self.session_service.update_request_status(request.id, SessionRequestStatus.REJECTED)
-            requests = await self.session_service.get_requests_by_session_id(self.session.id)
-            participants = [interaction.guild.get_member(request.user_id) for request in requests if request.status == SessionRequestStatus.ACCEPTED.value]
-            embed = SessionEmbed(participants, self.session.id, self.session.max_slots)
-            await message.edit(embed=embed)
-        except Exception as e:
-            logger.error(f"Error in QuitSessionButton: {e.with_traceback()}")
-            await interaction.followup.send("Произошла ошибка при выходе из сессии", ephemeral=True)
-
-class SessionEmbed(discord.Embed):
-    def __init__(self, participants: list[discord.Member], session_id: int, max_slots: int = 8):
-        super().__init__(title=f"Сессия {session_id}")
-        self.slots = {slot_num: "" for slot_num in range(max_slots)}
-        for slot_num in range(max_slots):
-            if slot_num < len(participants):
-                user = participants[slot_num]
-                self.slots[slot_num] = user.mention
-            self.add_field(name=f"Слот {slot_num + 1}", value="", inline=True)
-        logger.info(f"SessionEmbed: slots: {self.slots}")
-        self.update_fields()
-
-    def update_fields(self):
-        for slot_num, user in self.slots.items():
-            self.set_field_at(slot_num, name=f"Слот {slot_num + 1}", value=user, inline=False)
-        
-    def count_free_slots(self) -> int:
-        return sum(1 for user in self.slots.values() if user == "")
 
 class EndSessionConfirmationView(discord.ui.View):
     def __init__(self, bot: commands.Bot, session: Session, service_factory: ServiceFactory, original_interaction: discord.Interaction = None):
@@ -286,9 +68,8 @@ class AllParticipantsReviewedButton(Button):
             await interaction.followup.send("Вы не можете завершить сессию, так как не являетесь коучем.", ephemeral=True)
             return
         try:
-            session_service = self.service_factory.get_service('session')
-            user_service = self.service_factory.get_service('user')
-            await session_service.update_session(self.session.id, is_active=False)
+            session_service = await self.service_factory.get_service('session')
+            user_service = await self.service_factory.get_service('user')
             await interaction.followup.send(f"Сессия `{self.session.id}` успешно завершена. Все участники были разобраны.", ephemeral=True)
             requests = await session_service.get_requests_by_session_id(self.session.id)
             for request in requests:
@@ -327,8 +108,8 @@ class NotAllParticipantsReviewedButton(Button):
             # Здесь будет логика для отображения UserSelect
             # Пока просто заглушка
             
-            user_service = self.service_factory.get_service('user')
-            session_service = self.service_factory.get_service('session')
+            user_service = await self.service_factory.get_service('user')
+            session_service = await self.service_factory.get_service('session')
             logger.info(f"Session: {self.session}")
             requests = await session_service.get_requests_by_session_id(self.session.id)
             logger.info(f"Requests: {requests}")
@@ -428,8 +209,8 @@ class UnreviewedParticipantsSelectView(View):
         # Автоматически завершаем сессию, как если бы нажали "Да, все разобраны"
         # Это спорное поведение, возможно, лучше просто ничего не делать или запросить подтверждение.
         # Пока оставим так для простоты.
-        session_service = self.service_factory.get_service('session')
-        discord_service = self.service_factory.get_service('discord')
+        session_service = await self.service_factory.get_service('session')
+        discord_service = await self.service_factory.get_service('discord')
         guild = self.original_interaction.guild # Получаем guild из interaction
 
         await session_service.update_session(self.session.id, is_active=False)
@@ -486,8 +267,8 @@ class ConfirmUnreviewedSelectionButton(Button):
         service_factory = self.parent_view.service_factory
         selected_user_ids = self.parent_view.selected_user_ids # <--- Получаем актуальное значение здесь
 
-        session_service = service_factory.get_service('session')
-        user_service = service_factory.get_service('user') # Убедимся, что user_service тоже получаем из factory
+        session_service = await service_factory.get_service('session')
+        user_service = await service_factory.get_service('user') # Убедимся, что user_service тоже получаем из factory
         
         logger.info(f"Selected user IDs: {selected_user_ids}")
         unreviewed_db_user_ids = [int(uid) for uid in selected_user_ids]
@@ -567,6 +348,7 @@ class ReviewSessionView(View):
         self.session = session
         self.session_service = session_service
         self.user_service = user_service
+        self.activities = self.session_service.get_session_activities(session.id)
         self.add_item(LikeButton(session, session_service, user_service))
         self.add_item(DislikeButton(session, session_service, user_service))
 
@@ -584,6 +366,9 @@ class LikeButton(Button):
             user = interaction.user
             if user.id == self.session.coach_id:
                 await interaction.followup.send("Вы не можете оценивать себя.", ephemeral=True)
+                return
+            if user.id not in self.activities or self.activities[user.id] < 300:
+                await interaction.followup.send("Вы должны провести хотя бы 5 минут в сессии, чтобы оценить её.", ephemeral=True)
                 return
             reviews = await self.session_service.get_reviews_by_session_id(self.session.id)
             review = next((r for r in reviews if r.user_id == user.id), None)
@@ -611,10 +396,13 @@ class DislikeButton(Button):
             if user.id == self.session.coach_id:
                 await interaction.followup.send("Вы не можете оценивать себя.", ephemeral=True)
                 return
-            user_activity = await self.session_service.calculate_user_activity(self.session.id, user.id)
-            if user_activity < 300:
+            if user.id not in self.activities or self.activities[user.id] < 300:
                 await interaction.followup.send("Вы должны провести хотя бы 5 минут в сессии, чтобы оценить её.", ephemeral=True)
                 return
+            # user_activity = await self.session_service.calculate_user_activity(self.session.id, user.id)
+            # if user_activity < 300:
+            #     await interaction.followup.send("Вы должны провести хотя бы 5 минут в сессии, чтобы оценить её.", ephemeral=True)
+            #     return
             reviews = await self.session_service.get_reviews_by_session_id(self.session.id)
             logger.info(f"Reviews: {reviews}")
             review = next((r for r in reviews if r.user_id == user.id), None)
