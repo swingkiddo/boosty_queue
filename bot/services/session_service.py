@@ -48,18 +48,25 @@ class SessionService:
     async def get_request_by_user_id(self, session_id: int, user_id: int) -> Optional[SessionRequest]:
         return await self.session_repo.get_request_by_user_id(session_id, user_id)
 
-    async def get_accepted_requests_by_session_id(self, session_id: int) -> List[SessionRequest]:
-        requests = await self.get_requests_by_session_id(session_id)
-        return [request for request in requests if request.status == SessionRequestStatus.ACCEPTED.value]
-    
+    async def get_accepted_requests(self, session_id: int) -> List[SessionRequest]:
+        return await self.session_repo.get_accepted_requests(session_id)
+
     async def get_requests_by_session_id(self, session_id: int) -> List[SessionRequest]:
         return await self.session_repo.get_requests_by_session_id(session_id)
     
     async def create_request(self, session_id: int, user_id: int) -> SessionRequest:
         return await self.session_repo.create_request(session_id, user_id, SessionRequestStatus.PENDING.value)
+
+    async def update_request(self, request_id: int, **kwargs) -> SessionRequest:
+        logger.info(f"Updating request {request_id} with {kwargs}")
+        try:
+            return await self.session_repo.update_request(request_id, **kwargs)
+        except Exception as e:
+            logger.error(f"Error updating request {request_id}: {e.with_traceback()}")
+            raise e
     
     async def update_request_status(self, request_id: int, status: SessionRequestStatus) -> SessionRequest:
-        return await self.session_repo.update_request_status(request_id, status.value)
+        return await self.session_repo.update_request(request_id, status=status.value)
     
     async def delete_request(self, request_id: int) -> SessionRequest:
         return await self.session_repo.delete_request(request_id)
