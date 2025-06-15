@@ -20,7 +20,7 @@ class JoinSessionButton(Button):
                 await interaction.followup.send("Вы не можете присоединиться к своей сессии", ephemeral=True)
                 return
             message = interaction.message
-            requests = await self.session_service.get_accepted_requests_by_session_id(self.session.id)
+            requests = await self.session_service.get_accepted_requests(self.session.id)
             accepted_requests = [request for request in requests if request.status == SessionRequestStatus.ACCEPTED.value]
             if len(accepted_requests) >= self.session.max_slots:
                 await interaction.followup.send("В очереди уже достаточно участников", ephemeral=True)
@@ -32,15 +32,14 @@ class JoinSessionButton(Button):
                 return
 
             if request and (request.status == SessionRequestStatus.REJECTED.value or request.status == SessionRequestStatus.PENDING.value):
-                await self.session_service.update_request_status(request.id, SessionRequestStatus.ACCEPTED)
+                await self.session_service.update_request_status(request.id, SessionRequestStatus.ACCEPTED, slot_number=len(accepted_requests))
             
             if not request:
                 request = await self.session_service.create_request(self.session.id, user.id)
-                await self.session_service.update_request_status(request.id, SessionRequestStatus.ACCEPTED)
+                await self.session_service.update_request_status(request.id, SessionRequestStatus.ACCEPTED, slot_number=len(accepted_requests))
                 
-            requests = await self.session_service.get_requests_by_session_id(self.session.id)
-            accepted_requests = [request for request in requests if request.status == SessionRequestStatus.ACCEPTED.value]
-            participants = [interaction.guild.get_member(request.user_id) for request in accepted_requests]
+            requests = await self.session_service.get_accepted_requests(self.session.id)
+            participants = [interaction.guild.get_member(request.user_id) for request in requests]
             await interaction.followup.send(f"Вы присоединились к сессии", ephemeral=True)
             embed = SessionEmbed(participants, self.session.id, self.session.max_slots)
             await message.edit(embed=embed)

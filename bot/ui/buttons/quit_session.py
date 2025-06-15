@@ -21,9 +21,9 @@ class QuitSessionButton(Button):
             if not request:
                 await interaction.followup.send("Вы не участвуете в этой сессии", ephemeral=True)
                 return
-            await self.session_service.update_request_status(request.id, SessionRequestStatus.REJECTED)
-            requests = await self.session_service.get_requests_by_session_id(self.session.id)
-            participants = [interaction.guild.get_member(request.user_id) for request in requests if request.status == SessionRequestStatus.ACCEPTED.value]
+            await self.session_service.update_request(request.id, status=SessionRequestStatus.REJECTED.value, slot_number=None)
+            requests = await self.session_service.get_accepted_requests(self.session.id)
+            participants = [interaction.guild.get_member(request.user_id) for request in requests]
             embed = SessionEmbed(participants, self.session.id, self.session.max_slots)
             await message.edit(embed=embed)
         except Exception as e:
