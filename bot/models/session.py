@@ -62,8 +62,14 @@ class UserSessionActivity(Base):
 
     @property
     def duration(self) -> float:
+        result = 0
+        if self.leave_time:
+            result = (self.leave_time - self.join_time).total_seconds()
+
+        logger.info(f"Duration: {result}")
+        return result
+
+    def calculate_duration(self) -> float:
         if self.leave_time:
             return (self.leave_time - self.join_time).total_seconds()
-        if self.session.end_time:
-            return (self.session.end_time - self.join_time).total_seconds()
         return 0
