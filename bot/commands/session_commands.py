@@ -272,8 +272,9 @@ class SessionCommands(Cog):
             accepted_users = [user["user"] for user in accepted_users]
             for request in requests:
                 if request.user_id in [user.id for user in accepted_users]:
-                    await session_service.update_request_status(
-                        request.id, SessionRequestStatus.ACCEPTED
+                    idx = accepted_users.index(request.user_id)
+                    await session_service.update_request(
+                        request.id, status=SessionRequestStatus.ACCEPTED, slot_number=idx
                     )
                 else:
                     await session_service.update_request_status(
@@ -521,9 +522,9 @@ class SessionCommands(Cog):
         if not session:
             await self.response_to_user(ctx, f"Сессия {session_id} не найдена.", ctx.channel)
             return
-        if session.coach_id == ctx.author.id:
-            await self.response_to_user(ctx, f"Вы не можете присоединиться к своей сессии.", ctx.channel)
-            return
+        # if session.coach_id == ctx.author.id:
+        #     await self.response_to_user(ctx, f"Вы не можете присоединиться к своей сессии.", ctx.channel)
+        #     return
         if session and session.is_active:
             await self.response_to_user(ctx, f"Сессия {session_id} уже началась. Используйте /join, если есть свободные слоты.", ctx.channel)
             return
@@ -552,9 +553,9 @@ class SessionCommands(Cog):
         if not session:
             await self.response_to_user(ctx, f"Сессия {session_id} не найдена.", ctx.channel)
             return
-        if session.coach_id == ctx.author.id:
-            await self.response_to_user(ctx, f"Вы не можете покинуть очередь на свою сессию.", ctx.channel)
-            return
+        # if session.coach_id == ctx.author.id:
+        #     await self.response_to_user(ctx, f"Вы не можете покинуть очередь на свою сессию.", ctx.channel)
+        #     return
         if session.is_active:
             await self.response_to_user(ctx, f"Сессия {session_id} уже началась, вы не можете покинуть очередь.", ctx.channel)
             return
@@ -584,14 +585,14 @@ class SessionCommands(Cog):
         if not session:
             await self.response_to_user(ctx, f"Сессия {session_id} не найдена.", ctx.channel)
             return
-        if session.coach_id == ctx.author.id:
-            await self.response_to_user(ctx, f"Вы не можете присоединиться к своей сессии.", ctx.channel)
-            return
+        # if session.coach_id == ctx.author.id:
+        #     await self.response_to_user(ctx, f"Вы не можете присоединиться к своей сессии.", ctx.channel)
+        #     return
         if not session.is_active:
             await self.response_to_user(ctx, f"Сессия {session_id} еще не началась или уже завершена.", ctx.channel)
             return
 
-        accepted_requests = await session_service.get_accepted_requests_by_session_id(session.id)
+        accepted_requests = await session_service.get_accepted_requests(session.id)
         if len(accepted_requests) >= session.max_slots:
             await self.response_to_user(ctx, "Все слоты заняты.", ctx.channel)
             return
@@ -603,9 +604,9 @@ class SessionCommands(Cog):
 
         if not request:
             request = await session_service.create_request(session.id, ctx.author.id)
-        await session_service.update_request_status(request.id, SessionRequestStatus.ACCEPTED)
+        await session_service.update_request(request.id, status=SessionRequestStatus.ACCEPTED.value, slot_number=len(accepted_requests))
 
-        requests = await session_service.get_accepted_requests_by_session_id(session.id)
+        requests = await session_service.get_accepted_requests(session.id)
         participants = [ctx.guild.get_member(request.user_id) for request in requests]
         embed = SessionEmbed(participants, session.id, session.max_slots)
         channel = await ctx.guild.fetch_channel(session.text_channel_id)
@@ -624,20 +625,28 @@ class SessionCommands(Cog):
             if not session:
                 await self.response_to_user(ctx, f"Сессия {session_id} не найдена.", ctx.channel)
                 return
-            if session.coach_id == ctx.author.id:
-                await self.response_to_user(ctx, f"Вы не можете покинуть свою сессию.", ctx.channel)
-                return
+            # if session.coach_id == ctx.author.id:
+            #     await self.response_to_user(ctx, f"Вы не можете покинуть свою сессию.", ctx.channel)
+            #     return
             request = await session_service.get_request_by_user_id(session.id, ctx.author.id)
             if not request:
                 await self.response_to_user(ctx, f"Вы не участвуете в сессии {session.id}.", ctx.channel)
                 return
-            await session_service.update_request_status(request.id, SessionRequestStatus.REJECTED)
-            requests = await session_service.get_accepted_requests_by_session_id(session.id)
+            logger.info(1)
+            await session_service.update_request(request.id, status=SessionRequestStatus.REJECTED.value, slot_number=None)
+            logger.info(2)
+            requests = await session_service.get_accepted_requests(session.id)
+            logger.info(3)
             participants = [ctx.guild.get_member(request.user_id) for request in requests]
+            logger.info(4)
             embed = SessionEmbed(participants, session.id, session.max_slots)
+            logger.info(5)
             channel = await ctx.guild.fetch_channel(session.text_channel_id)
+            logger.info(6)
             message = await channel.fetch_message(session.session_message_id)
+            logger.info(7)
             await message.edit(embed=embed)
+            logger.info(8)
             await self.response_to_user(ctx, f"Вы покинули сессию {session.id}", ctx.channel)
         except Exception as e:
             logger.error(f"Error quitting session: {e.with_traceback()}")
