@@ -1,7 +1,7 @@
 from services import *
 from models import *
 from logger import logger
-from utils import adapt_db_datetime
+from utils import adapt_db_datetime, format_duration
 import pandas as pd
 from discord import Member, User
 from typing import List, Dict, Any
@@ -163,43 +163,17 @@ class ReportService:
         return session_info
 
     async def prepare_session_activity_info(self) -> Dict[str, Any]:
-        voice_channel_state = self.bot.channel_states.get(self.session.voice_channel_id)
-        activities = [activity.to_dict() for activity in self.activities]
-        activities_df = pd.DataFrame(activities)
-        participants_ids = activities_df['user_id'].unique()
-        if voice_channel_state:
-            unique_users = voice_channel_state['unique_users']
-            unique_user_ids = list(unique_users.keys())
-        else:
-            unique_user_ids = []
-        
         data = {
             "Участники": [],
             "Время на сессии": [],
         }
-        for participant_id in participants_ids:
-            if participant_id in unique_user_ids:
-                user = unique_users[participant_id]
-            else:
-                user = await self.bot.fetch_user(participant_id)
-            activities_df['join_time'] = pd.to_datetime(activities_df['join_time'])
-            activities_df['leave_time'] = pd.to_datetime(activities_df['leave_time'])
-            activities_df['duration'] = activities_df['leave_time'] - activities_df['join_time']
-            activities_df['duration'] = activities_df['duration'].dt.total_seconds()
-            total_duration = activities_df[activities_df['user_id'] == participant_id]['duration'].sum()
-            hours = int(total_duration // 3600)
-            if hours < 10:
-                hours = f"0{hours}"
-            minutes = int((total_duration % 3600) // 60)
-            if minutes < 10:
-                minutes = f"0{minutes}"
-            seconds = int(total_duration % 60)
-            if seconds < 10:
-                seconds = f"0{seconds}"
-            duration_str = f"{hours}:{minutes}:{seconds}"
+
+        for user_id, duration in self.activities.items():
+            logger.info(f"User id: {user_id}, duration: {duration}")
+            user = await self.bot.fetch_user(user_id)
+            duration_str = format_duration(duration)
             data["Участники"].append(user.name)
             data["Время на сессии"].append(duration_str)
-            
 
         session_activity_df = pd.DataFrame(data)
         logger.info(f"Session activity df: {session_activity_df}")
