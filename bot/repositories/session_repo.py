@@ -123,6 +123,15 @@ class SessionRepository(BaseRepository[Session]):
         result = await self.session.execute(query)
         return result.scalars().all()
 
+    async def get_accepted_requests(self, session_id: int) -> List[SessionRequest]:
+        query = (
+            select(SessionRequest)
+            .where(SessionRequest.session_id == session_id, SessionRequest.status == SessionRequestStatus.ACCEPTED.value)
+            .order_by(SessionRequest.slot_number)
+        )
+        result = await self.session.execute(query)
+        return result.scalars().all()
+    
     async def get_requests_by_user_id(self, user_id: int) -> List[SessionRequest]:
         query = (
             select(SessionRequest)
@@ -172,6 +181,19 @@ class SessionRepository(BaseRepository[Session]):
         self.session.add(request)
         await self.session.commit()
         return request
+
+    async def update_request(
+        self, request_id: int, **kwargs
+    ) -> SessionRequest:
+        query = (
+            update(SessionRequest)
+            .where(SessionRequest.id == request_id)
+            .values(**kwargs)
+            .returning(SessionRequest)
+        )
+        result = await self.session.execute(query)
+        await self.session.commit()
+        return result.scalar_one_or_none()
 
     async def update_request_status(
         self, request_id: int, status: SessionRequestStatus
