@@ -115,17 +115,15 @@ class SessionService:
         except Exception as e:
             logger.error(f"Error getting session activities: {e.with_traceback()}")
             return {}
-        logger.info(f"Activities: {activities}")
         activities_by_users = {}
         for activity in activities:
             if activity.user_id not in activities_by_users:
                 activities_by_users[activity.user_id] = []
             activities_by_users[activity.user_id].append(activity)
-        logger.info(f"Activities by users: {activities_by_users}")
-        activities = {
-            user_id: sum(activity.duration for activity in activities_by_users[user_id])
-            for user_id in activities_by_users
-        }
+        activities = {}
+        for user_id in activities_by_users:
+            activities[user_id] = sum(activity.calculate_duration() for activity in activities_by_users[user_id])
+
         logger.info(f"Activities: {activities}")
         return activities
 
