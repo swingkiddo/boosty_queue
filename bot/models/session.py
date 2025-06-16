@@ -2,6 +2,7 @@ from .base import Base
 from sqlalchemy import Column, String, BigInteger, DateTime, Integer, Float, ForeignKey, Enum, Boolean
 from sqlalchemy.orm import relationship
 import enum
+from datetime import datetime
 
 class Session(Base):
     __tablename__ = "sessions"
@@ -56,20 +57,24 @@ class UserSessionActivity(Base):
     session_id = Column(Integer, ForeignKey("sessions.id"), nullable=False, index=True)
     user_id = Column(BigInteger, ForeignKey("users.id"), nullable=False, index=True)
     join_time = Column(DateTime, nullable=False)
-    leave_time = Column(DateTime, nullable=True) # Может быть NULL, если пользователь еще в канале
+    leave_time = Column(DateTime, nullable=True)
+    total_duration_seconds = Column(Integer, default=0)
+    is_active = Column(Boolean, default=True)
+
     user = relationship("User", back_populates="session_activities")
     session = relationship("Session", back_populates="activities")
 
+    def mark_completed(self, leave_time: datetime):
+        """Завершает активность и рассчитывает общее время"""
+        if self.is_active:
+            self.leave_time = leave_time
+            self.total_duration_seconds = int((self.leave_time - self.join_time).total_seconds())
+            self.is_active = False
+
     @property
     def duration(self) -> float:
-        result = 0
-        if self.leave_time:
-            result = (self.leave_time - self.join_time).total_seconds()
-
-        logger.info(f"Duration: {result}")
-        return result
-
-    def calculate_duration(self) -> float:
-        if self.leave_time:
+        if self.total_duration_seconds > 0:
+            return float(self.total_duration_seconds)
+        elif self.leave_time:
             return (self.leave_time - self.join_time).total_seconds()
         return 0
