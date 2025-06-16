@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 # Настройки пула соединений
 engine = create_async_engine(
     config.DATABASE_URL, 
-    echo=False,
+    echo=config.DEBUG,
     pool_size=10,          # Размер пула соединений
     max_overflow=20,       # Максимальное количество дополнительных соединений
     pool_timeout=30,       # Таймаут ожидания соединения

@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str
     ADMIN_ID: int
     DEVELOPER_ID: int
-
+    DEBUG: bool = False
     class Config:
         env_file = ".env"
 
