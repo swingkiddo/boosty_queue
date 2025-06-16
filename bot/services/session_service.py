@@ -95,7 +95,7 @@ class SessionService:
             return None
         requests = await self.get_requests_by_session_id(session_id)
         reviews = await self.get_reviews_by_session_id(session_id)
-        activities = await self.get_session_activities(session_id)
+        activities = await self.calculate_session_activities(session_id)
         return {
             "session": session,
             "requests": requests,
@@ -122,17 +122,41 @@ class SessionService:
         except Exception as e:
             logger.error(f"Error getting session activities: {e.with_traceback()}")
             return {}
+        return activities
+
+    async def get_active_user_activities(self, session_id: int, user_id: int) -> List[UserSessionActivity]:
+        """Получает активные (незавершённые) активности пользователя"""
+        return await self.session_repo.get_active_user_activities(session_id, user_id)
+
+    async def complete_user_activity(self, activity_id: int, leave_time: datetime) -> UserSessionActivity:
+        """Завершает активность пользователя"""
+        activity = await self.get_user_session_activity_by_id(activity_id)
+        if activity and activity.is_active:
+            activity.mark_completed(leave_time)
+            return await self.session_repo.update_user_session_activity(
+                activity_id,
+                leave_time=leave_time,
+                total_duration_seconds=activity.total_duration_seconds,
+                is_active=False
+            )
+        return activity
+
+    async def get_user_total_session_time(self, activities: List[UserSessionActivity]) -> float:
+        """Получает общее время пользователя в сессии (сумма всех активностей)"""
+        if not activities:
+            return 0
+        return sum(activity.duration for activity in activities if not activity.is_active)
+
+    async def calculate_session_activities(self, session_id: int) -> Dict[int, float]:
+        activities = await self.get_session_activities(session_id)
         activities_by_users = {}
         for activity in activities:
             if activity.user_id not in activities_by_users:
                 activities_by_users[activity.user_id] = []
             activities_by_users[activity.user_id].append(activity)
-        activities = {}
         for user_id in activities_by_users:
-            activities[user_id] = sum(activity.calculate_duration() for activity in activities_by_users[user_id])
-
-        logger.info(f"Activities: {activities}")
-        return activities
+            activities_by_users[user_id] = await self.get_user_total_session_time(activities_by_users[user_id])
+        return activities_by_users
 
     async def calculate_user_activity(self, session_id: int, user_id: int) -> float:
         activities = await self.get_user_session_activities(session_id, user_id)
