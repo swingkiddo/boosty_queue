@@ -348,7 +348,6 @@ class ReviewSessionView(View):
         self.session = session
         self.session_service = session_service
         self.user_service = user_service
-        self.activities = self.session_service.get_session_activities(session.id)
         self.add_item(LikeButton(session, session_service, user_service))
         self.add_item(DislikeButton(session, session_service, user_service))
 
@@ -367,7 +366,8 @@ class LikeButton(Button):
             if user.id == self.session.coach_id:
                 await interaction.followup.send("Вы не можете оценивать себя.", ephemeral=True)
                 return
-            activities = await self.session_service.get_session_activities(self.session.id)
+            activities = await self.session_service.calculate_session_activities(self.session.id)
+            logger.info(f"Activities: {activities}")
             if user.id not in activities or activities[user.id] < 300:
                 await interaction.followup.send("Вы должны провести хотя бы 5 минут в сессии, чтобы оценить её.", ephemeral=True)
                 return
