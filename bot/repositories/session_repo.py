@@ -320,6 +320,20 @@ class SessionRepository(BaseRepository[Session]):
         result = await self.session.execute(query)
         return result.scalars().all()
 
+    async def get_active_user_activities(
+        self, session_id: int, user_id: int
+    ) -> List[UserSessionActivity]:
+        query = (
+            select(UserSessionActivity)
+            .where(
+                UserSessionActivity.session_id == session_id,
+                UserSessionActivity.user_id == user_id,
+                UserSessionActivity.is_active == True,
+            )
+        )
+        result = await self.session.execute(query)
+        return result.scalars().all()
+
     async def update_user_session_activity(
         self, activity_id: int, **kwargs
     ) -> UserSessionActivity:
