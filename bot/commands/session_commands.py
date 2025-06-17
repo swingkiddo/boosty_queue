@@ -136,14 +136,7 @@ class SessionCommands(Cog):
                 end_time=None,
                 max_slots=max_slots,
             )
-            members = []
-            for member in guild.members:
-                logger.info(f"member: {member}")
-                if not member.bot:
-                    await session_service.create_request(session.id, member.id)
-                    members.append(member)
-            logger.info(f"members: {members}")
-            logger.info(f"Creating session with max_slots: {max_slots}")
+
             overwrites = roles_manager.get_session_channels_overwrites()
             category = await guild.create_category(
                 f"Сессия {session.id}", overwrites=overwrites
@@ -154,7 +147,6 @@ class SessionCommands(Cog):
             logger.info(f"Session channels created")
 
             embed = SessionQueueEmbed(author, session.id)
-            embed.update_queue(members)
             view = SessionQueueView(
                 session, session_service, discord_service, user_service
             )
@@ -267,7 +259,7 @@ class SessionCommands(Cog):
                 if request.user_id in accepted_users_ids:
                     idx = accepted_users_ids.index(request.user_id)
                     await session_service.update_request(
-                        request.id, status=SessionRequestStatus.ACCEPTED.value, slot_number=idx
+                        request.id, status=SessionRequestStatus.ACCEPTED.value, slot_number=idx + 1
                     )
                 else:
                     await session_service.update_request_status(
@@ -629,6 +621,9 @@ class SessionCommands(Cog):
                 return
             await session_service.update_request(request.id, status=SessionRequestStatus.REJECTED.value, slot_number=None)
             requests = await session_service.get_accepted_requests(session.id)
+            for idx, req in enumerate(requests):
+                if req.slot_number != idx + 1:
+                    await session_service.update_request(req.id, slot_number=idx + 1)
             participants = [ctx.guild.get_member(request.user_id) for request in requests]
             embed = SessionEmbed(participants, session.id, session.max_slots)
             channel = await ctx.guild.fetch_channel(session.text_channel_id)
