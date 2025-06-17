@@ -10,7 +10,7 @@ from .buttons import JoinQueueButton, CancelQueueButton, JoinSessionButton, Quit
 
 class SessionQueueView(View):
     def __init__(self, session: Session, session_service: SessionService, discord_service: DiscordService, user_service: UserService):
-        super().__init__()
+        super().__init__(timeout=None)
         self.session = session
         self.session_service = session_service
         self.discord_service = discord_service
@@ -20,7 +20,7 @@ class SessionQueueView(View):
 
 class SessionView(View):
     def __init__(self, session: Session, session_service: SessionService, discord_service: DiscordService, user_service: UserService):
-        super().__init__()
+        super().__init__(timeout=None)
         self.session = session
         self.session_service = session_service
         self.discord_service = discord_service
@@ -31,7 +31,7 @@ class SessionView(View):
 
 class EndSessionConfirmationView(discord.ui.View):
     def __init__(self, bot: commands.Bot, session: Session, service_factory: ServiceFactory, original_interaction: discord.Interaction = None):
-        super().__init__(timeout=180) # Таймаут для View
+        super().__init__(timeout=None) # Таймаут для View
         self.bot = bot
         self.session = session
         self.service_factory = service_factory
@@ -174,7 +174,7 @@ class NotAllParticipantsReviewedButton(Button):
 # Заглушка для View с UserSelect, которую мы реализуем далее
 class UnreviewedParticipantsSelectView(View):
     def __init__(self, session: Session, service_factory: ServiceFactory, participants: list[discord.abc.User | discord.Member], original_interaction: discord.Interaction):
-        super().__init__(timeout=300) # Таймаут для выбора
+        super().__init__(timeout=None) # Таймаут для выбора
         self.session = session
         self.service_factory = service_factory
         # participants - это уже отфильтрованные discord.Member или discord.User объекты
@@ -344,7 +344,7 @@ class ConfirmUnreviewedSelectionButton(Button):
 
 class ReviewSessionView(View):
     def __init__(self, session: Session, session_service: SessionService, user_service: UserService):
-        super().__init__()
+        super().__init__(timeout=None)
         self.session = session
         self.session_service = session_service
         self.user_service = user_service
