@@ -23,6 +23,9 @@ class QuitSessionButton(Button):
                 return
             await self.session_service.update_request(request.id, status=SessionRequestStatus.REJECTED.value, slot_number=None)
             requests = await self.session_service.get_accepted_requests(self.session.id)
+            for idx, req in enumerate(requests):
+                if req.slot_number != idx + 1:
+                    await self.session_service.update_request(req.id, slot_number=idx + 1)
             participants = [interaction.guild.get_member(request.user_id) for request in requests]
             embed = SessionEmbed(participants, self.session.id, self.session.max_slots)
             await message.edit(embed=embed)
