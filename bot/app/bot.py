@@ -2,7 +2,7 @@ from datetime import datetime
 from discord import Intents, Member, VoiceState, VoiceChannel
 from discord.ext import commands
 
-from factory import ServiceFactory
+from factory import ServiceFactory, get_service_factory
 from commands import SessionCommands, UserCommands
 from logger import logger
 from database.db import init_db
@@ -35,12 +35,13 @@ class BoostyQueueBot(commands.Bot):
         return channel.category and channel.category.name.startswith("Сессия")
 
     async def handle_voice_channel_join(self, member: Member, voice_ch: VoiceChannel):
-        session_service = await self.service_factory.get_service("session")
-        session_id = int(voice_ch.category.name.split(" ")[1])
-        await session_service.create_user_session_activity(
-            session_id, member.id, join_time=datetime.now()
-        )
-        logger.info(f"User {member.name} joined session {session_id}")
+        async with get_service_factory(self.service_factory) as factory:
+            session_service = await factory.get_service("session")
+            session_id = int(voice_ch.category.name.split(" ")[1])
+            await session_service.create_user_session_activity(
+                session_id, member.id, join_time=datetime.now()
+            )
+            logger.info(f"User {member.name} joined session {session_id}")
 
     async def on_voice_state_update(
         self, member: Member, before: VoiceState, after: VoiceState
@@ -48,34 +49,36 @@ class BoostyQueueBot(commands.Bot):
         if member.bot:
             return
 
-        session_service = await self.service_factory.get_service("session")
-        logger.info(
-            f"on_voice_state_update: {member.name} {before.channel} {after.channel}"
-        )
-        if after.channel and self.is_session_channel(after.channel):
-            session_id = int(after.channel.category.name.split(" ")[1])
-            logger.info(f"session_id: {session_id}")
-            active_activities = await session_service.get_active_user_activities(
-                session_id, member.id
+        async with get_service_factory(self.service_factory) as factory:
+            session_service = await factory.get_service("session")
+            logger.info(
+                f"on_voice_state_update: {member.name} {before.channel} {after.channel}"
             )
-            if not active_activities:
-                await session_service.create_user_session_activity(
-                    session_id, member.id, join_time=datetime.now()
-                )
-                logger.info(f"User {member.name} joined session {session_id}")
 
-        if before.channel and self.is_session_channel(before.channel):
-            session_id = int(before.channel.category.name.split(" ")[1])
-            logger.info(f"session_id: {session_id}")
-            active_activities = await session_service.get_active_user_activities(
-                session_id, member.id
-            )
-            for activity in active_activities:
-                await session_service.complete_user_activity(
-                    activity.id, datetime.now()
+            if after.channel and self.is_session_channel(after.channel):
+                session_id = int(after.channel.category.name.split(" ")[1])
+                logger.info(f"session_id: {session_id}")
+                active_activities = await session_service.get_active_user_activities(
+                    session_id, member.id
                 )
+                if not active_activities:
+                    await session_service.create_user_session_activity(
+                        session_id, member.id, join_time=datetime.now()
+                    )
+                    logger.info(f"User {member.name} joined session {session_id}")
 
-            logger.info(f"User {member.name} left session {session_id}")
+            if before.channel and self.is_session_channel(before.channel):
+                session_id = int(before.channel.category.name.split(" ")[1])
+                logger.info(f"session_id: {session_id}")
+                active_activities = await session_service.get_active_user_activities(
+                    session_id, member.id
+                )
+                for activity in active_activities:
+                    await session_service.complete_user_activity(
+                        activity.id, datetime.now()
+                    )
+
+                logger.info(f"User {member.name} left session {session_id}")
 
         logger.info(f"Channel states: {self.channel_states}")
 
@@ -97,25 +100,27 @@ class BoostyQueueBot(commands.Bot):
                 role.name for role in after.roles if role not in before.roles
             ]
             lost_roles = [role.name for role in before.roles if role not in after.roles]
-            user_service = await self.service_factory.get_service("user")
-            user = await user_service.get_user(after.id)
-            if not user:
-                user = await user_service.create_user(
-                    after.id, after.name, join_date=after.joined_at.replace(tzinfo=None)
-                )
-            if "Coach T1" in gained_roles:
-                await user_service.update_user(user.id, coach_tier="Coach T1")
-            elif "Coach T2" in gained_roles:
-                await user_service.update_user(user.id, coach_tier="Coach T2")
-            elif "Coach T3" in gained_roles:
-                await user_service.update_user(user.id, coach_tier="Coach T3")
 
-            if "Coach T1" in lost_roles:
-                await user_service.update_user(user.id, coach_tier=None)
-            elif "Coach T2" in lost_roles:
-                await user_service.update_user(user.id, coach_tier=None)
-            elif "Coach T3" in lost_roles:
-                await user_service.update_user(user.id, coach_tier=None)
+            async with get_service_factory(self.service_factory) as factory:
+                user_service = await factory.get_service("user")
+                user = await user_service.get_user(after.id)
+                if not user:
+                    user = await user_service.create_user(
+                        after.id, after.name, join_date=after.joined_at.replace(tzinfo=None)
+                    )
+                if "Coach T1" in gained_roles:
+                    await user_service.update_user(user.id, coach_tier="Coach T1")
+                elif "Coach T2" in gained_roles:
+                    await user_service.update_user(user.id, coach_tier="Coach T2")
+                elif "Coach T3" in gained_roles:
+                    await user_service.update_user(user.id, coach_tier="Coach T3")
+
+                if "Coach T1" in lost_roles:
+                    await user_service.update_user(user.id, coach_tier=None)
+                elif "Coach T2" in lost_roles:
+                    await user_service.update_user(user.id, coach_tier=None)
+                elif "Coach T3" in lost_roles:
+                    await user_service.update_user(user.id, coach_tier=None)
 
     async def on_ready(self):
         from random import randint
@@ -161,67 +166,45 @@ class BoostyQueueBot(commands.Bot):
                         overwrites=admin_overwrites,
                     )
 
-                user_service = await self.service_factory.get_service("user")
-                for member in self.guild.members:
-                    roles = [role.name for role in member.roles]
-                    if member.bot:
-                        continue
-                    if Roles.SUB in roles:
-                        user = await user_service.get_user(member.id)
-                        join_date = member.joined_at.replace(tzinfo=None)
-                        if not user:
-                            await user_service.create_user(
-                                member.id, member.name, join_date=join_date
+                async with get_service_factory(self.service_factory) as factory:
+                    user_service = await factory.get_service("user")
+                    for member in self.guild.members:
+                        roles = [role.name for role in member.roles]
+                        if member.bot:
+                            continue
+                        if Roles.SUB in roles:
+                            user = await user_service.get_user(member.id)
+                            join_date = member.joined_at.replace(tzinfo=None)
+                            if not user:
+                                await user_service.create_user(
+                                    member.id, member.name, join_date=join_date
+                                )
+                        if (
+                            Roles.COACH_T1 in roles
+                            or Roles.COACH_T2 in roles
+                            or Roles.COACH_T3 in roles
+                        ):
+                            coach_tier = (
+                                Roles.COACH_T1
+                                if Roles.COACH_T1 in roles
+                                else (
+                                    Roles.COACH_T2
+                                    if Roles.COACH_T2 in roles
+                                    else Roles.COACH_T3
+                                )
                             )
-                    if (
-                        Roles.COACH_T1 in roles
-                        or Roles.COACH_T2 in roles
-                        or Roles.COACH_T3 in roles
-                    ):
-                        coach_tier = (
-                            Roles.COACH_T1
-                            if Roles.COACH_T1 in roles
-                            else (
-                                Roles.COACH_T2
-                                if Roles.COACH_T2 in roles
-                                else Roles.COACH_T3
-                            )
-                        )
-                        user = await user_service.get_user(member.id)
-                        if not user:
-                            await user_service.create_user(
-                                member.id,
-                                member.name,
-                                join_date=join_date,
-                                coach_tier=coach_tier,
-                            )
-                        else:
-                            await user_service.update_user(
-                                member.id, coach_tier=coach_tier
-                            )
-                # session_service = await self.service_factory.get_service('session')
-                # session_id = 4
-                # session = await session_service.get_session_by_id(session_id)
-                # logger.info(f"Getting session activities for session {session_id}")
-                # activities = await session_service.get_session_activities(session_id)
-                # logger.info(f"Activities: {activities}")
-                # from ui.session_view import ReviewSessionView
-
-                # review_session_view = ReviewSessionView(
-                #     session, session_service, user_service
-                # )
-                # coach = self.guild.get_member(session.coach_id)
-                # text = f"Сессия {session_id} завершена. Коуч: {coach.mention}. Оцени сессию."
-
-                # for user_id, duration in activities.items():
-                #     member = self.guild.get_member(user_id)
-                #     logger.info(f"Member: {member.name} {duration}")
-                #     if member.name == "koochamala":
-                #         await member.send(text, view=review_session_view)
-                #     if duration > 300 and member.id != session.coach_id:
-                #         if member:
-                #             await member.send(text, view=review_session_view)
-                #             logger.info(f"Sent review session view to {member.name}")
+                            user = await user_service.get_user(member.id)
+                            if not user:
+                                await user_service.create_user(
+                                    member.id,
+                                    member.name,
+                                    join_date=join_date,
+                                    coach_tier=coach_tier,
+                                )
+                            else:
+                                await user_service.update_user(
+                                    member.id, coach_tier=coach_tier
+                                )
 
         except Exception as e:
             logger.error(f"Error on_ready: {e}")
