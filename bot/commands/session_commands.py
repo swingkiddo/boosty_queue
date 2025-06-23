@@ -591,7 +591,7 @@ class SessionCommands(Cog):
 
         if not request:
             request = await session_service.create_request(session.id, ctx.author.id)
-        await session_service.update_request(request.id, status=SessionRequestStatus.ACCEPTED.value, slot_number=len(accepted_requests))
+        await session_service.update_request(request.id, status=SessionRequestStatus.ACCEPTED.value, slot_number=len(accepted_requests) + 1)
 
         requests = await session_service.get_accepted_requests(session.id)
         participants = [ctx.guild.get_member(request.user_id) for request in requests]

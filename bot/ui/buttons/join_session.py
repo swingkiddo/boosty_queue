@@ -30,13 +30,13 @@ class JoinSessionButton(Button):
             if request and request.status == SessionRequestStatus.ACCEPTED.value:
                 await interaction.followup.send("Вы уже участвуете в сессии", ephemeral=True)
                 return
-
+            next_slot_number = len(accepted_requests) + 1
             if request and (request.status == SessionRequestStatus.REJECTED.value or request.status == SessionRequestStatus.PENDING.value):
-                await self.session_service.update_request_status(request.id, SessionRequestStatus.ACCEPTED, slot_number=len(accepted_requests))
+                await self.session_service.update_request_status(request.id, SessionRequestStatus.ACCEPTED, slot_number=next_slot_number)
             
             if not request:
                 request = await self.session_service.create_request(self.session.id, user.id)
-                await self.session_service.update_request_status(request.id, SessionRequestStatus.ACCEPTED, slot_number=len(accepted_requests))
+                await self.session_service.update_request_status(request.id, SessionRequestStatus.ACCEPTED, slot_number=next_slot_number)
                 
             requests = await self.session_service.get_accepted_requests(self.session.id)
             participants = [interaction.guild.get_member(request.user_id) for request in requests]
