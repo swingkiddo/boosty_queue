@@ -16,9 +16,9 @@ class JoinSessionButton(Button):
         await interaction.response.defer()
         try:
             user = interaction.user
-            if user.id == self.session.coach_id:
-                await interaction.followup.send("Вы не можете присоединиться к своей сессии", ephemeral=True)
-                return
+            # if user.id == self.session.coach_id:
+            #     await interaction.followup.send("Вы не можете присоединиться к своей сессии", ephemeral=True)
+            #     return
             message = interaction.message
             requests = await self.session_service.get_accepted_requests(self.session.id)
             accepted_requests = [request for request in requests if request.status == SessionRequestStatus.ACCEPTED.value]

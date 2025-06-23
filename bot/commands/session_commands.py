@@ -758,12 +758,6 @@ class SessionCommands(Cog):
                         f"Пользователь {user.mention} исключен из сессии {session_id}.", 
                         ctx.channel
                     )
-                    
-                    # Уведомляем исключенного пользователя
-                    try:
-                        await user.send(f"Вы были исключены из сессии {session_id}.")
-                    except Exception as e:
-                        logger.error(f"Не удалось отправить сообщение пользователю {user.id}: {e}")
                 else:
                     await self.response_to_user(ctx, error_msg, ctx.channel)
                     
