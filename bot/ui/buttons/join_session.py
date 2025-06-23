@@ -16,9 +16,9 @@ class JoinSessionButton(Button):
         await interaction.response.defer()
         try:
             user = interaction.user
-            # if user.id == self.session.coach_id:
-            #     await interaction.followup.send("Вы не можете присоединиться к своей сессии", ephemeral=True)
-            #     return
+            if user.id == self.session.coach_id:
+                await interaction.followup.send("Вы не можете присоединиться к своей сессии", ephemeral=True)
+                return
             message = interaction.message
             requests = await self.session_service.get_accepted_requests(self.session.id)
             accepted_requests = [request for request in requests if request.status == SessionRequestStatus.ACCEPTED.value]
@@ -32,12 +32,10 @@ class JoinSessionButton(Button):
                 return
             next_slot_number = len(accepted_requests) + 1
             if request and (request.status == SessionRequestStatus.REJECTED.value or request.status == SessionRequestStatus.PENDING.value):
-                await self.session_service.update_request_status(request.id, SessionRequestStatus.ACCEPTED, slot_number=next_slot_number)
-            
+                await self.session_service.update_request(request.id, status=SessionRequestStatus.ACCEPTED.value, slot_number=next_slot_number)
             if not request:
                 request = await self.session_service.create_request(self.session.id, user.id)
-                await self.session_service.update_request_status(request.id, SessionRequestStatus.ACCEPTED, slot_number=next_slot_number)
-                
+                await self.session_service.update_request(request.id, status=SessionRequestStatus.ACCEPTED.value, slot_number=next_slot_number)
             requests = await self.session_service.get_accepted_requests(self.session.id)
             participants = [interaction.guild.get_member(request.user_id) for request in requests]
             await interaction.followup.send(f"Вы присоединились к сессии", ephemeral=True)
