@@ -18,8 +18,21 @@ services:
       dockerfile: docker/bot/Dockerfile
     env_file:
       - .env
-    ports:
-      - "18101:8080"
+    volumes:
+      - ./bot:/bot
+      - ./logs:/bot/logs
+      - ./tests:/bot/tests
+    networks:
+      - bot_network
+    depends_on:
+      - db
+
+  bot-dev:
+    build:
+      context: .
+      dockerfile: docker/bot/Dockerfile
+    env_file:
+      - .env.dev
     volumes:
       - ./bot:/bot
       - ./logs:/bot/logs

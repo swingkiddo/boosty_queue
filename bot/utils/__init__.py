@@ -1,4 +1,1 @@
-from datetime import datetime, timezone
-
-def get_current_time():
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+from .utils import get_current_time, adapt_db_datetime, format_duration

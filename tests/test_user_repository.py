@@ -91,7 +91,7 @@ async def test_create_and_get_user(user_service: UserService):
     assert created_user.join_date.month == current_time.month
     assert created_user.join_date.day == current_time.day
     assert created_user.priority_given_by == 0
-    assert created_user.total_replays_session == 0 # Проверка default значения
+    assert created_user.total_replay_sessions == 0 # Проверка default значения
 
     retrieved_user = await user_service.get_user(TEST_USER_ID)
     assert retrieved_user is not None, "Созданный пользователь должен быть найден"
@@ -110,12 +110,12 @@ async def test_update_user(user_service: UserService):
         join_date=current_time,
         priority_given_by=0,
         priority_expires_at=current_time,
-        total_replays_session=initial_total_replays
+        total_replay_sessions=initial_total_replays
     )
 
     updated_data = {
         "nickname": UPDATED_NICKNAME,
-        "total_replays_session": 20,
+        "total_replay_sessions": 20,
         "priority_coefficient": 1.5
     }
     updated_user = await user_service.update_user(TEST_USER_ID, **updated_data)
@@ -123,13 +123,13 @@ async def test_update_user(user_service: UserService):
     assert updated_user is not None, "Пользователь должен быть обновлен"
     assert updated_user.id == TEST_USER_ID
     assert updated_user.nickname == UPDATED_NICKNAME
-    assert updated_user.total_replays_session == 20
+    assert updated_user.total_replay_sessions == 20
     assert updated_user.priority_coefficient == 1.5
 
     retrieved_user = await user_service.get_user(TEST_USER_ID)
     assert retrieved_user is not None, "Обновленный пользователь должен быть найден"
     assert retrieved_user.nickname == UPDATED_NICKNAME
-    assert retrieved_user.total_replays_session == 20
+    assert retrieved_user.total_replay_sessions == 20
     assert retrieved_user.priority_coefficient == 1.5
 
 @pytest.mark.asyncio
@@ -211,7 +211,7 @@ async def test_complex_scenario_create_update_delete(user_service: UserService):
     await user_service.update_user(
         user_a_id,
         nickname=user_a_updated_nick,
-        total_replays_session=10
+        total_replay_sessions=10
     )
 
     # 5. Проверить, что пользователь А обновлен, а пользователь Б не изменился
@@ -219,7 +219,7 @@ async def test_complex_scenario_create_update_delete(user_service: UserService):
     retrieved_user_b = await user_service.get_user(user_b_id)
 
     assert retrieved_user_a.nickname == user_a_updated_nick
-    assert retrieved_user_a.total_replays_session == 10
+    assert retrieved_user_a.total_replay_sessions == 10
     
     assert retrieved_user_b.nickname == user_b_initial_nick # не изменился
     assert retrieved_user_b.total_creative_sessions == 5 # не изменился

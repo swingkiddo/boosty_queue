@@ -1,6 +1,6 @@
-from bot.repositories.user_repo import UserRepository
-from bot.models.user import User
-
+from repositories.user_repo import UserRepository
+from models.user import User
+from typing import List
 class UserService:
     def __init__(self, user_repo: UserRepository):
         self.user_repo = user_repo
@@ -19,3 +19,6 @@ class UserService:
     
     async def get_all_users(self) -> list[User]:
         return await self.user_repo.get_all()
+
+    async def get_users_by_ids(self, user_ids: List[int]) -> List[User]:
+        return await self.user_repo.get_users_by_ids(user_ids)
