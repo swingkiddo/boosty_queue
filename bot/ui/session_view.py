@@ -26,7 +26,7 @@ class SessionView(View):
         self.discord_service = discord_service
         self.user_service = user_service
         self.add_item(JoinSessionButton(session, session_service, user_service))
-        self.add_item(QuitSessionButton(session, session_service, user_service))
+        #self.add_item(QuitSessionButton(session, session_service, user_service))
 
 
 class EndSessionConfirmationView(discord.ui.View):

@@ -478,7 +478,8 @@ class SessionCommands(Cog):
                                 message_content, view=review_session_view
                             )
                         except Exception as e:
-                            logger.error(f"Error sending review message: {e.with_traceback()}")
+                            import traceback
+                            logger.error(f"Error sending review message: {traceback.format_exc()}")
 
                 await text_channel.send(f"Сессия {active_session.id} завершена. Канал автоматически удалится через 10 минут.")
                 await asyncio.sleep(self.SESSION_AUTO_DELETE_TIME)
@@ -664,40 +665,40 @@ class SessionCommands(Cog):
         message = await channel.fetch_message(session.session_message_id)
         await message.edit(embed=embed)
 
-    @commands.hybrid_command(name="quit")
-    @commands.has_any_role(Roles.SUB)
-    async def quit_session(self, ctx: commands.Context, session_id: int):
-        try:
-            logger.info(f"Quitting session {session_id}")
-            async with get_service_factory(self.service_factory) as factory:
-                session_service = await factory.get_service("session")
+    # @commands.hybrid_command(name="quit")
+    # @commands.has_any_role(Roles.SUB)
+    # async def quit_session(self, ctx: commands.Context, session_id: int):
+    #     try:
+    #         logger.info(f"Quitting session {session_id}")
+    #         async with get_service_factory(self.service_factory) as factory:
+    #             session_service = await factory.get_service("session")
                 
-                session = await session_service.get_session_by_id(session_id)
-                if not session:
-                    await self.response_to_user(ctx, f"Сессия {session_id} не найдена.", ctx.channel)
-                    return
+    #             session = await session_service.get_session_by_id(session_id)
+    #             if not session:
+    #                 await self.response_to_user(ctx, f"Сессия {session_id} не найдена.", ctx.channel)
+    #                 return
                 
-                if session.coach_id == ctx.author.id:
-                    await self.response_to_user(ctx, f"Вы не можете покинуть свою сессию.", ctx.channel)
-                    return
+    #             if session.coach_id == ctx.author.id:
+    #                 await self.response_to_user(ctx, f"Вы не можете покинуть свою сессию.", ctx.channel)
+    #                 return
                 
-                # Используем общий метод
-                success, error_msg = await self._remove_user_from_session(
-                    session_service, ctx.guild, session, ctx.author.id
-                )
+    #             # Используем общий метод
+    #             success, error_msg = await self._remove_user_from_session(
+    #                 session_service, ctx.guild, session, ctx.author.id
+    #             )
                 
-                if success:
-                    await self.response_to_user(ctx, f"Вы покинули сессию {session.id}", ctx.channel)
-                else:
-                    await self.response_to_user(ctx, error_msg, ctx.channel)
+    #             if success:
+    #                 await self.response_to_user(ctx, f"Вы покинули сессию {session.id}", ctx.channel)
+    #             else:
+    #                 await self.response_to_user(ctx, error_msg, ctx.channel)
                     
-        except Exception as e:
-            logger.error(f"Error quitting session: {e}")
-            await self.response_to_user(
-                ctx, 
-                f"Произошла ошибка при покидании сессии {session_id}. Пожалуйста, попробуйте позже.", 
-                ctx.channel
-            )
+    #     except Exception as e:
+    #         logger.error(f"Error quitting session: {e}")
+    #         await self.response_to_user(
+    #             ctx,
+    #             f"Произошла ошибка при покидании сессии {session_id}. Пожалуйста, попробуйте позже.",
+    #             ctx.channel
+    #         )
 
     @commands.hybrid_command(name="kick")
     @commands.has_any_role(Roles.MOD, Roles.COACH_T1, Roles.COACH_T2, Roles.COACH_T3)
